@@ -1,0 +1,55 @@
+[package]
+name = "tag-editor-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "TagEditor core: file operations, tag processing, ONNX inference"
+
+# ライブラリ（テスト対象のコアロジック）とアプリ本体（ネイティブ起動）の両方を
+# ビルドする。lib はユニット/プロパティテストの対象、bin は Tauri アプリの
+# エントリポイント（`main.rs` → `tag_editor_core::run()`）。
+[lib]
+name = "tag_editor_core"
+# rlib: テスト・bin から利用する通常のライブラリ。
+# staticlib/cdylib は不要（デスクトップアプリのため）。
+crate-type = ["lib"]
+
+# アプリ本体のバイナリ。`src/main.rs` が `run()` を呼ぶ薄い入口。
+[[bin]]
+name = "tag-editor"
+path = "src/main.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+image = { workspace = true }
+walkdir = { workspace = true }
+regex = { workspace = true }
+rayon = { workspace = true }
+
+# Tauri v2 application framework (command boundary lives here)。
+# 実ウィンドウを生成しフロントエンドと通信するため、既定機能（wry ランタイム・
+# protocol-asset 等）を有効化する。tauri-build と組み合わせて `run()` から
+# `tauri::Builder::run` を呼べるようにする。
+tauri = { version = "2", features = ["protocol-asset"] }
+# フォルダ選択ダイアログ（要件 1.3 のフォルダ選択）。ネイティブのフォルダ
+# ピッカーを提供し、npm ビルド不要でフロントエンドから呼べる。
+tauri-plugin-dialog = "2"
+# ONNX Runtime inference (WD14 / ML-Danbooru models)。
+# load-dynamic: 実行時に共有ライブラリをロードする（リンク時にネイティブ
+# ライブラリを要求しないため、バイナリ/テストのリンクが可能になる）。
+ort = { version = "2.0.0-rc.10", default-features = false, features = ["load-dynamic"] }
+# HuggingFace model download
+hf-hub = { version = "0.4", default-features = false, features = ["ureq", "rustls-tls"] }
+
+# Tauri のビルドスクリプト依存。tauri.conf.json の読み取り・コマンド生成
+# コンテキスト（`tauri::generate_context!`）のための情報を用意する。
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dev-dependencies]
+proptest = { workspace = true }
+tempfile = { workspace = true }
+
+[features]
+default = []

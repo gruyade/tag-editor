@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TagEditor</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- 上部ツールバー: フォルダ選択とサムネイルサイズ変更（要件 1.3, 1.4） -->
+    <header class="toolbar">
+      <button id="select-folder" type="button">フォルダ選択</button>
+      <span id="folder-path" class="folder-path" title=""></span>
+      <div class="spacer"></div>
+      <label class="select-toggle">
+        <input id="select-mode" type="checkbox" />
+        選択モード
+      </label>
+      <button id="select-all" type="button" class="ghost" disabled>全選択</button>
+      <button id="select-none" type="button" class="ghost" disabled>選択解除</button>
+      <span id="select-count" class="select-count"></span>
+      <div class="spacer-sm"></div>
+      <label class="thumb-size">
+        サムネイルサイズ
+        <input
+          id="thumb-size"
+          type="range"
+          min="64"
+          max="512"
+          step="16"
+          value="128"
+        />
+        <span id="thumb-size-value">128</span>px
+      </label>
+    </header>
+
+    <!-- 状態メッセージ（画像なし・フォルダ読取不可など、要件 1.7, 1.8） -->
+    <div id="status-bar" class="status-bar" role="status" aria-live="polite"></div>
+
+    <main class="layout">
+      <!-- 左: サムネイル一覧（要件 1.3, 1.4） -->
+      <section class="list-pane" aria-label="画像一覧">
+        <div id="thumb-grid" class="thumb-grid"></div>
+      </section>
+
+      <!-- 右: 拡大プレビュー（要件 1.5）とタグ編集（要件 2.5） -->
+      <section class="detail-pane" aria-label="プレビューとタグ編集">
+        <div class="preview-wrap">
+          <img id="preview" class="preview" alt="拡大プレビュー" />
+          <p id="preview-empty" class="hint">画像を選択するとプレビューが表示される</p>
+        </div>
+
+        <div class="tag-edit">
+          <div class="tag-edit-head">
+            <label for="tag-text">タグ（Tag_File）</label>
+            <span id="current-image" class="current-image"></span>
+          </div>
+          <textarea
+            id="tag-text"
+            class="tag-text"
+            spellcheck="false"
+            placeholder="画像を選択するとタグが読み込まれる"
+            disabled
+          ></textarea>
+          <div class="tag-edit-actions">
+            <button id="save-tags" type="button" disabled>保存</button>
+            <span id="save-status" class="save-status" role="status" aria-live="polite"></span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- 下部: 各操作パネル（タスク 21.2）。タブで切り替える。 -->
+    <section class="ops" aria-label="操作パネル">
+      <div class="ops-tabs" role="tablist">
+        <button class="ops-tab active" data-tab="bulk" role="tab" type="button">一括操作</button>
+        <button class="ops-tab" data-tab="aggregate" role="tab" type="button">集計/フィルタ</button>
+        <button class="ops-tab" data-tab="sort" role="tab" type="button">仕訳/サイズ/タグ振分</button>
+        <button class="ops-tab" data-tab="rename" role="tab" type="button">改名/連番/正規化</button>
+        <button class="ops-tab" data-tab="orphan" role="tab" type="button">孤立削除</button>
+        <button class="ops-tab" data-tab="infer" role="tab" type="button">推論/バッチ</button>
+        <button class="ops-tab" data-tab="model" role="tab" type="button">モデル選択</button>
+        <button class="ops-tab windows-only" data-tab="windows" role="tab" type="button" hidden>Windows限定</button>
+      </div>
+
+      <div class="ops-body">
+        <!-- 一括操作（要件 3.1, 3.3, 3.4） -->
+        <div class="ops-panel active" data-panel="bulk">
+          <p class="panel-note">
+            対象:
+            <label><input type="radio" name="bulk-target" value="all" checked /> 一覧の全画像</label>
+            <label><input type="radio" name="bulk-target" value="selected" /> 選択中のみ</label>
+            <span class="target-hint" id="bulk-target-hint"></span>
+          </p>
+          <div class="field-row">
+            <input id="bulk-tags" type="text" class="text-input" placeholder="タグ（カンマ区切り）例: 1girl, solo" />
+            <button id="bulk-add" type="button">追加</button>
+            <button id="bulk-remove" type="button">削除</button>
+            <button id="bulk-dedup" type="button">重複除去</button>
+          </div>
+          <div id="bulk-result" class="op-result" aria-live="polite"></div>
+        </div>
+
+        <!-- 集計/フィルタ（要件 6.1〜6.8） -->
+        <div class="ops-panel" data-panel="aggregate">
+          <div class="field-row">
+            <button id="agg-run" type="button">タグ集計</button>
+            <span id="agg-summary" class="inline-note"></span>
+          </div>
+          <div id="agg-result" class="op-result agg-list" aria-live="polite"></div>
+          <hr class="divider" />
+          <div class="field-row">
+            <input id="filter-include" type="text" class="text-input" placeholder="含む（カンマ区切り）" />
+            <input id="filter-exclude" type="text" class="text-input" placeholder="除外（カンマ区切り）" />
+            <button id="filter-run" type="button">フィルタ適用</button>
+            <button id="filter-clear" type="button" class="ghost">解除</button>
+          </div>
+          <div id="filter-result" class="op-result" aria-live="polite"></div>
+        </div>
+
+        <!-- 仕訳/サイズ/タグ振分（要件 7, 9, 10） -->
+        <div class="ops-panel" data-panel="sort">
+          <fieldset class="sub">
+            <legend>仕訳（move/copy/gather/distribute）</legend>
+            <div class="field-row">
+              <select id="sort-op" class="text-input">
+                <option value="move">move（移動）</option>
+                <option value="copy">copy（コピー）</option>
+                <option value="gather">gather（集約）</option>
+                <option value="distribute">distribute（分配）</option>
+              </select>
+            </div>
+            <div class="field-row">
+              <input id="sort-source" type="text" class="text-input" placeholder="source フォルダ" />
+              <button id="sort-source-pick" type="button" class="ghost">…</button>
+              <input id="sort-dest" type="text" class="text-input" placeholder="dest フォルダ" />
+              <button id="sort-dest-pick" type="button" class="ghost">…</button>
+              <button id="sort-run" type="button">実行</button>
+            </div>
+            <div id="sort-result" class="op-result" aria-live="polite"></div>
+          </fieldset>
+
+          <fieldset class="sub">
+            <legend>画像サイズ振分</legend>
+            <div class="field-row">
+              <input id="size-source" type="text" class="text-input" placeholder="source フォルダ" />
+              <button id="size-source-pick" type="button" class="ghost">…</button>
+              <input id="size-threshold" type="number" class="num-input" min="1" max="100000" value="1024" placeholder="長辺閾値" />
+              <input id="size-dest" type="text" class="text-input" placeholder="dest_root フォルダ" />
+              <button id="size-dest-pick" type="button" class="ghost">…</button>
+              <button id="size-run" type="button">実行</button>
+            </div>
+            <div id="size-result" class="op-result" aria-live="polite"></div>
+          </fieldset>
+
+          <fieldset class="sub">
+            <legend>タグ振分</legend>
+            <div class="field-row">
+              <input id="tagsort-source" type="text" class="text-input" placeholder="source フォルダ" />
+              <button id="tagsort-source-pick" type="button" class="ghost">…</button>
+              <input id="tagsort-judge" type="text" class="text-input" placeholder="判定タグ（カンマ区切り）" />
+            </div>
+            <div class="field-row">
+              <input id="tagsort-contains" type="text" class="text-input" placeholder="含む → dest" />
+              <button id="tagsort-contains-pick" type="button" class="ghost">…</button>
+              <input id="tagsort-not" type="text" class="text-input" placeholder="含まない → dest" />
+              <button id="tagsort-not-pick" type="button" class="ghost">…</button>
+              <button id="tagsort-run" type="button">実行</button>
+            </div>
+            <div id="tagsort-result" class="op-result" aria-live="polite"></div>
+          </fieldset>
+        </div>
+
+        <!-- 改名/連番/正規化（要件 4, 8） -->
+        <div class="ops-panel" data-panel="rename">
+          <fieldset class="sub">
+            <legend>正規表現改名 / 連番（対象: 現在のフォルダ）</legend>
+            <div class="field-row">
+              <input id="rename-pattern" type="text" class="text-input" placeholder="正規表現パターン" />
+              <input id="rename-replacement" type="text" class="text-input" placeholder="置換文字列（NUM でゼロ埋め連番）" />
+            </div>
+            <div class="field-row">
+              <label class="inline-check"><input id="rename-numbering-on" type="checkbox" /> 連番を使う</label>
+              <input id="rename-num-start" type="number" class="num-input" min="0" value="1" placeholder="開始" disabled />
+              <input id="rename-num-width" type="number" class="num-input" min="1" value="3" placeholder="桁数" disabled />
+              <button id="rename-run" type="button">改名実行</button>
+            </div>
+            <div id="rename-result" class="op-result" aria-live="polite"></div>
+          </fieldset>
+
+          <fieldset class="sub">
+            <legend>ファイル名正規化（.ext.txt → basename.txt）</legend>
+            <div class="field-row">
+              <button id="normalize-run" type="button">正規化実行</button>
+              <span class="inline-note">対象: 現在のフォルダ</span>
+            </div>
+            <div id="normalize-result" class="op-result" aria-live="polite"></div>
+          </fieldset>
+        </div>
+
+        <!-- 孤立削除（承認一覧、要件 11.1〜11.4） -->
+        <div class="ops-panel" data-panel="orphan">
+          <div class="field-row">
+            <button id="orphan-find" type="button">孤立キャプションを検出</button>
+            <span id="orphan-summary" class="inline-note"></span>
+          </div>
+          <div id="orphan-list" class="op-result orphan-list" aria-live="polite"></div>
+          <div class="field-row">
+            <button id="orphan-delete" type="button" class="danger" disabled>承認して削除</button>
+          </div>
+          <div id="orphan-result" class="op-result" aria-live="polite"></div>
+        </div>
+
+        <!-- 推論/バッチ（進捗・キャンセル・閾値・Batch_Size、要件 16.7, 17.6, 17.7） -->
+        <div class="ops-panel" data-panel="infer">
+          <p class="panel-note">
+            対象:
+            <label><input type="radio" name="infer-target" value="all" checked /> 一覧の全画像</label>
+            <label><input type="radio" name="infer-target" value="selected" /> 選択中のみ</label>
+            <span class="target-hint" id="infer-target-hint"></span>
+          </p>
+          <div class="field-row">
+            <label class="inline-label">
+              閾値
+              <input id="infer-threshold" type="range" min="0" max="1" step="0.01" value="0.35" />
+              <span id="infer-threshold-value">0.35</span>
+            </label>
+            <label class="inline-label">
+              Batch_Size
+              <input id="infer-batch" type="number" class="num-input" min="1" max="64" placeholder="既定8" />
+            </label>
+            <label class="inline-label">
+              モデル
+              <select id="infer-model" class="text-input"></select>
+            </label>
+          </div>
+          <div class="field-row">
+            <button id="infer-run" type="button">推論実行</button>
+            <button id="infer-cancel" type="button" class="danger" disabled>キャンセル</button>
+          </div>
+          <div class="progress-wrap">
+            <progress id="infer-progress" max="100" value="0"></progress>
+            <span id="infer-progress-text" class="inline-note"></span>
+          </div>
+          <div id="infer-result" class="op-result" aria-live="polite"></div>
+        </div>
+
+        <!-- モデル選択（要件 15.1, 15.5） -->
+        <div class="ops-panel" data-panel="model">
+          <div class="field-row">
+            <input id="model-local-dir" type="text" class="text-input" placeholder="ローカルモデルディレクトリ（任意）" />
+            <button id="model-local-pick" type="button" class="ghost">…</button>
+            <button id="model-refresh" type="button">一覧更新</button>
+          </div>
+          <div class="field-row">
+            <select id="model-list" class="text-input"></select>
+            <button id="model-load-local" type="button">ローカル読込</button>
+            <button id="model-download" type="button">ダウンロード</button>
+          </div>
+          <div id="model-excluded" class="inline-note"></div>
+          <div id="model-result" class="op-result" aria-live="polite"></div>
+        </div>
+
+        <!-- Windows限定（symlink 作成 + パス変換、要件 13.2, 16.6） -->
+        <div class="ops-panel" data-panel="windows">
+          <fieldset class="sub">
+            <legend>シンボリックリンク作成</legend>
+            <div class="field-row">
+              <input id="symlink-target" type="text" class="text-input" placeholder="リンク元（実体）" />
+              <input id="symlink-path" type="text" class="text-input" placeholder="作成先（リンク）" />
+              <button id="symlink-run" type="button">作成</button>
+            </div>
+            <div id="symlink-result" class="op-result" aria-live="polite"></div>
+          </fieldset>
+
+          <fieldset class="sub">
+            <legend>パス変換</legend>
+            <div class="field-row">
+              <input id="convert-path" type="text" class="text-input" placeholder="変換するパス" />
+              <select id="convert-direction" class="text-input">
+                <option value="WindowsToLinux">Windows → Linux(WSL)</option>
+                <option value="LinuxToWindows">Linux(WSL) → Windows</option>
+              </select>
+              <button id="convert-run" type="button">変換</button>
+            </div>
+            <div id="convert-result" class="op-result" aria-live="polite"></div>
+          </fieldset>
+        </div>
+      </div>
+    </section>
+
+    <script src="main.js"></script>
+  </body>
+</html>

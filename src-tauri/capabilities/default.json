@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "メインウィンドウが必要とする既定のケイパビリティ（コア機能・イベント・ダイアログ）。",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:default",
+    "core:app:default",
+    "core:webview:default",
+    "dialog:default",
+    "dialog:allow-open"
+  ]
+}

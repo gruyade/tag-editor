@@ -1,0 +1,1538 @@
+{
+  "pbtResults": {
+    "3.4 タグフィルタのプロパティテスト": {
+      "status": "passed",
+      "lastRunTimestamp": 1789961968150
+    },
+    "2.5 信頼度 parse/render ラウンドトリップのプロパティテスト": {
+      "status": "passed",
+      "lastRunTimestamp": 1789961979787
+    },
+    "4.3 タグ削除のプロパティテスト": {
+      "status": "passed",
+      "lastRunTimestamp": 1789962110067
+    },
+    "5.2 ファイル名正規化のプロパティテスト": {
+      "status": "passed",
+      "lastRunTimestamp": 1789962122895
+    },
+    "6.4 閾値妥当性のプロパティテスト": {
+      "status": "passed",
+      "lastRunTimestamp": 1789962266611
+    },
+    "8.6 バッチ分割のプロパティテスト": {
+      "status": "passed",
+      "lastRunTimestamp": 1789962425906
+    },
+    "11.2 Tag_File 書込→読込ラウンドトリップのプロパティテスト": {
+      "status": "passed",
+      "lastRunTimestamp": 1789963116322
+    },
+    "10.3 列挙件数上限のプロパティテスト": {
+      "status": "passed",
+      "lastRunTimestamp": 1789963151913
+    },
+    "10.2 拡張子列挙のプロパティテスト": {
+      "status": "passed",
+      "lastRunTimestamp": 1789965724687
+    }
+  },
+  "executionHistory": {
+    "1. プロジェクト基盤とコア型の確立": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961010015
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961034513
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961337812
+      }
+    ],
+    "2.1 タグ正規化キーとトークン分割を実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961010094
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961343120
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961632231
+      }
+    ],
+    "2.2 TagFormat の booru 変換を実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961010256
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961344065
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961633164
+      }
+    ],
+    "2.3 booru 変換のプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961010434
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961858293
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962010006
+      }
+    ],
+    "2.4 信頼度トークンの parse / render を実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961010493
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961345022
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961634109
+      }
+    ],
+    "2.5 信頼度 parse/render ラウンドトリップのプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961010558
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961859206
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962008116
+      }
+    ],
+    "3.1 タグ集計ロジックを実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961010638
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961345979
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961635512
+      }
+    ],
+    "3.2 タグ集計のプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961010704
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961860600
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962006757
+      }
+    ],
+    "3.3 タグフィルタ述語を実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961010766
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961347013
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961636250
+      }
+    ],
+    "3.4 タグフィルタのプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961010834
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961861235
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962009069
+      }
+    ],
+    "4.1 タグ追加・削除・重複除去のコアロジックを実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961010887
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961857313
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962005777
+      }
+    ],
+    "4.2 タグ追加のプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961010947
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962020814
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962179947
+      }
+    ],
+    "4.3 タグ削除のプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961011007
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962021755
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962180874
+      }
+    ],
+    "4.4 重複除去のプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961011075
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962023167
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962181775
+      }
+    ],
+    "5.1 ファイル名正規化ロジックを実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961011133
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961644232
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961832496
+      }
+    ],
+    "5.2 ファイル名正規化のプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961011223
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962024127
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962183202
+      }
+    ],
+    "5.3 連番付与とNUMプレースホルダ展開を実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961011279
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961646263
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961833430
+      }
+    ],
+    "5.4 連番付与のプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961011334
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962024796
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962183959
+      }
+    ],
+    "5.5 gather/distribute の接頭辞命名ロジックを実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961011390
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961646575
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961834826
+      }
+    ],
+    "5.6 gather/distribute 命名のプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961011455
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962190372
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962329358
+      }
+    ],
+    "6.1 画像サイズ振分先の一意決定ロジックを実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961011507
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961647523
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961835789
+      }
+    ],
+    "6.2 画像サイズ振分決定のプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961011592
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962191757
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962328323
+      }
+    ],
+    "6.3 長辺閾値の妥当性判定を実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961011646
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961648459
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961836729
+      }
+    ],
+    "6.4 閾値妥当性のプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961011704
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962192708
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962326924
+      }
+    ],
+    "6.5 タグによる振分先の一意決定ロジックを実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961011766
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961649876
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961838142
+      }
+    ],
+    "6.6 タグ振分決定のプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961011824
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962193692
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962326170
+      }
+    ],
+    "7.1 Windows/Linux パス変換を実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961011876
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961650772
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961839092
+      }
+    ],
+    "7.2 パス変換ラウンドトリップのプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961011931
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962194647
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962330317
+      }
+    ],
+    "8.1 信頼度閾値によるタグ採用ロジックを実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961012001
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961651727
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961840045
+      }
+    ],
+    "8.2 動画除外と Batch_Size 解決・バッチ分割を実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961012113
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961652735
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961841332
+      }
+    ],
+    "8.3 閾値採用のプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961012167
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962340201
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962450560
+      }
+    ],
+    "8.4 動画除外のプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961012220
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962339191
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962451491
+      }
+    ],
+    "8.5 Batch_Size 解決のプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961012291
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962338246
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962452894
+      }
+    ],
+    "8.6 バッチ分割のプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961012344
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962337289
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962453521
+      }
+    ],
+    "9. Checkpoint - 純粋ロジックのテスト通過確認": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961012405
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962467838
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962639873
+      }
+    ],
+    "10.1 画像列挙を実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961012461
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962654570
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962824236
+      }
+    ],
+    "10.2 拡張子列挙のプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961012538
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789963007182
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789963169818
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789965657015
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789965870341
+      }
+    ],
+    "10.3 列挙件数上限のプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961012589
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789963008124
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789963170751
+      }
+    ],
+    "10.4 サムネイル生成とサイズクランプを実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961012643
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962825190
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962993070
+      }
+    ],
+    "10.5 サムネイルサイズクランプのプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961012703
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789963009038
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789963171691
+      }
+    ],
+    "10.6 破損画像の代替表示・列挙継続の単体テスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961012763
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789963196467
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789963604366
+      }
+    ],
+    "11.1 Tag_File 読み込み・書き込みを実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961012817
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962993969
+      }
+    ],
+    "11.2 Tag_File 書込→読込ラウンドトリップのプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961012873
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789963010070
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789963172708
+      }
+    ],
+    "11.3 書込失敗時の元状態保持の単体テスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961012962
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789963197343
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789963603029
+      }
+    ],
+    "12.1 一括追加・削除・重複除去をファイルI/Oと結線": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961013020
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789963198335
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789963605448
+      }
+    ],
+    "12.2 一括操作の部分失敗継続・対象0件の単体テスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961013096
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964068365
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964317135
+      }
+    ],
+    "12.3 タグ集計・フィルタをファイル走査と結線": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961013149
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789963616742
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789963876074
+      }
+    ],
+    "12.4 集計中の読込失敗除外・空結果の単体テスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961013200
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964330556
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964587531
+      }
+    ],
+    "13.1 RenameService の正規表現置換・連番改名を実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961013256
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789963617734
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789963874948
+      }
+    ],
+    "13.2 改名時の対保存のプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961013310
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964070699
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964319490
+      }
+    ],
+    "13.3 不正正規表現・禁止文字・衝突の単体テスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961013370
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964069748
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964320920
+      }
+    ],
+    "13.4 ファイル名正規化コマンドを実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961013472
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789963891596
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964055193
+      }
+    ],
+    "13.5 CaptionService の孤立キャプション特定・削除を実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961013526
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789963892374
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964056210
+      }
+    ],
+    "13.6 孤立キャプション特定のプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961013581
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964071550
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964321631
+      }
+    ],
+    "14.1 sort_files（gather/distribute/move/copy）を実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961013641
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964067403
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964318071
+      }
+    ],
+    "14.2 仕訳の対保存のプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961013699
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964770600
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789965048390
+      }
+    ],
+    "14.3 仕訳の原子性・衝突保持の単体テスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961013773
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964771556
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789965049473
+      }
+    ],
+    "14.4 sort_by_size を実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961013850
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964331507
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964588535
+      }
+    ],
+    "14.5 サイズ振分の衝突保持・寸法失敗の単体テスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961013906
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964772451
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789965050795
+      }
+    ],
+    "14.6 sort_by_tag を実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961013972
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964589470
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964759994
+      }
+    ],
+    "14.7 タグ振分の衝突保持・宛先不可の単体テスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961014031
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964773899
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789965051825
+      }
+    ],
+    "15. Checkpoint - ファイル操作系のテスト通過確認": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961014091
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789966549975
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789966556042
+      }
+    ],
+    "16.1 前処理と ort セッション推論を実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961014146
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964774620
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789965046984
+      }
+    ],
+    "16.2 推論出力の値域・ラベル対応のプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961014252
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789965088285
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789965292894
+      }
+    ],
+    "16.3 run_inference（単一/バッチ・並列前処理・進捗・キャンセル）を実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961014312
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789965315864
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789965627630
+      }
+    ],
+    "16.4 バッチ推論の部分失敗継続・読込不可・キャンセルの単体テスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961014369
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789966194747
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789966361754
+      }
+    ],
+    "17.1 モデル一覧と ONNX フィルタを実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961014425
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789965069072
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789965291882
+      }
+    ],
+    "17.2 モデル一覧 ONNX フィルタのプロパティテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961014485
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789965315013
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789965629448
+      }
+    ],
+    "17.3 ローカルモデル読込を実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961014545
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789965313573
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789965628564
+      }
+    ],
+    "17.4 リモートモデルのダウンロード・保存を実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961014598
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789965658380
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789966183268
+      }
+    ],
+    "17.5 モデル異常系の単体テスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961014652
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789966196153
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789966359550
+      }
+    ],
+    "18.1 capabilities とシンボリックリンク作成を実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961014706
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789965659180
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789965870129
+      }
+    ],
+    "18.2 パス変換コマンドを純粋ロジックと結線": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961014769
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789965885152
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789966184284
+      }
+    ],
+    "18.3 symlink 異常系の単体テスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961014826
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789966196863
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789966360445
+      }
+    ],
+    "19. Checkpoint - 推論・モデル・プラットフォームのテスト通過確認": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961014881
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789966379167
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789966556828
+      }
+    ],
+    "20.1 全サービスを Tauri コマンドとして公開": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961014940
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789966566520
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789967206907
+      }
+    ],
+    "20.2 コマンド境界と長時間処理応答性の単体テスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961015031
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789967219856
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789967369524
+      }
+    ],
+    "21.1 一覧・プレビュー・タグ編集画面を実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961015089
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789967383068
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789968399968
+      }
+    ],
+    "21.2 各操作パネルを実装": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961015146
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789968835946
+      }
+    ],
+    "21.3 起動とUI応答性のスモークテスト": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961015202
+      },
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789968845107
+      },
+      {
+        "executionId": "d477c5f2-ece3-40c5-bbd7-d4eb7b3203e5",
+        "chatSessionId": "sess_c3660da9-3679-4840-8706-371880273551",
+        "timestamp": 1789981819200
+      }
+    ],
+    "22. Final checkpoint - 全テスト通過とプラットフォーム確認": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789961015257
+      },
+      {
+        "executionId": "431df04b-f8ba-4c41-ae8a-3d1635b9110f",
+        "chatSessionId": "sess_c3660da9-3679-4840-8706-371880273551",
+        "timestamp": 1789981103226
+      },
+      {
+        "executionId": "d477c5f2-ece3-40c5-bbd7-d4eb7b3203e5",
+        "chatSessionId": "sess_c3660da9-3679-4840-8706-371880273551",
+        "timestamp": 1789981786258
+      }
+    ],
+    "3. TagServiceの集計・フィルタ純粋ロジック": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962009138
+      }
+    ],
+    "2. タグ正規化とTagFormatの純粋ロジック": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962010067
+      }
+    ],
+    "4. タグ一括操作の純粋ロジック": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962181864
+      }
+    ],
+    "6. 振分決定・閾値判定の純粋ロジック": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962328448
+      }
+    ],
+    "5. ファイル名・命名規則の純粋ロジック": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962329408
+      }
+    ],
+    "7. Windowsパス変換の純粋ロジック": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962330426
+      }
+    ],
+    "8. 推論補助の純粋ロジック": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789962453587
+      }
+    ],
+    "11. FileService の Tag_File 読み書き": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789963603141
+      }
+    ],
+    "10. FileService の列挙・サムネイル・プレビュー": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789963604516
+      }
+    ],
+    "13. RenameService と CaptionService": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964321688
+      }
+    ],
+    "12. TagService の一括操作・集計・フィルタ結線": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789964587658
+      }
+    ],
+    "14. SortService の仕訳・サイズ振分・タグ振分": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789965051884
+      }
+    ],
+    "17. ModelService のモデル一覧・読込・取得": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789966359622
+      }
+    ],
+    "18. PlatformService（Windows限定）": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789966360505
+      }
+    ],
+    "16. InferenceService の推論エンジン": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789966361819
+      }
+    ],
+    "20. Tauri コマンド境界の結線": [
+      {
+        "executionId": "853caf36-794a-495a-915b-6c3e67a2425c",
+        "chatSessionId": "sess_cc72fab6-3f4d-4abe-87d9-f08aa27d2d5f",
+        "timestamp": 1789967369595
+      }
+    ],
+    "21. UI 層の実装と結線": [
+      {
+        "executionId": "d477c5f2-ece3-40c5-bbd7-d4eb7b3203e5",
+        "chatSessionId": "sess_c3660da9-3679-4840-8706-371880273551",
+        "timestamp": 1789981819281
+      }
+    ]
+  }
+}
