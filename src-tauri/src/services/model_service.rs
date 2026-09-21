@@ -1099,6 +1099,138 @@ pub fn download_model<D: ModelDownloader>(
     Ok(dest_dir.to_path_buf())
 }
 
+/// [`download_model_with_progress`] が取得段階の境界で通知する進捗フェーズ。
+///
+/// 「onnx 取得 → タグ定義取得 → 保存」の 3 段階に対応する（design 変更 4）。
+/// [`spawn_model_download`](crate::commands::adapters::spawn_model_download) が
+/// これを `Progress`（`done`/`total`）へ写像してフロントエンドへ emit する。
+///
+/// [`spawn_model_download`]: crate::commands::adapters::spawn_model_download
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DownloadPhase {
+    /// `model.onnx` を取得完了。
+    OnnxFetched,
+    /// タグ定義ファイルを取得完了。
+    TagDefinitionFetched,
+    /// ローカル保存完了。
+    Saved,
+}
+
+/// [`download_model`] と同じ同期コアを、取得段階ごとの進捗通知とキャンセル確認
+/// 付きで実行する薄いラッパ（design 変更 4）。
+///
+/// 既存 `download_model` のシグネチャ・再試行・原子的保存・部分ファイル除去の
+/// 挙動はそのまま [`download_model`] へ委譲し変更しない。本関数は取得段の境界
+/// （onnx 取得完了後／タグ定義取得完了後／保存後）で `on_progress` を呼び、
+/// 各境界で `cancel` が `true` になっていれば残りの処理を中断して
+/// [`crate::error::AppErrorKind::Cancelled`] を返す。
+///
+/// # 引数
+///
+/// - `downloader`: ファイル取得トランスポート（実 `HfHubDownloader` もモックも可）。
+/// - `variant` / `dest_dir`: [`download_model`] と同じ。
+/// - `cancel`: キャンセル要求フラグ（[`crate::commands::CancelRegistry::register`]
+///   が返す共有ハンドル）。取得段の境界でのみ確認する（バイト取得の途中では
+///   確認しない。トランスポート自体の中断は行わない）。
+/// - `on_progress`: 各段階完了時に呼ばれるコールバック。
+///
+/// # キャンセルの扱い
+///
+/// `cancel` が `true` の場合、以降の段階へ進まず即座に
+/// `Err(AppError::cancelled(..))` を返す。この時点までに保存済みのファイルは
+/// 存在しない（保存は最終段でのみ行うため、キャンセルは常に「保存前」で
+/// 発生する）。
+pub fn download_model_with_progress<D, F>(
+    downloader: &D,
+    variant: &ModelVariant,
+    dest_dir: &Path,
+    cancel: &std::sync::atomic::AtomicBool,
+    mut on_progress: F,
+) -> AppResult<std::path::PathBuf>
+where
+    D: ModelDownloader,
+    F: FnMut(DownloadPhase),
+{
+    use std::sync::atomic::Ordering;
+
+    let repo = match &variant.location {
+        ModelLocation::Remote(repo) => repo.as_str(),
+        ModelLocation::Local(_) => {
+            return Err(AppError::invalid_input(
+                "ローカルモデルはダウンロード対象ではありません",
+            ));
+        }
+    };
+
+    if cancel.load(Ordering::SeqCst) {
+        return Err(AppError::cancelled("モデルダウンロードがキャンセルされました"));
+    }
+
+    if let Err(e) = std::fs::create_dir_all(dest_dir) {
+        return Err(AppError::from(e).with_path(dest_dir.to_string_lossy().into_owned()));
+    }
+
+    // 1) model.onnx を取得する（再試行付き）。
+    let onnx_bytes = fetch_with_retry(downloader, repo, SAVED_ONNX_NAME)
+        .map_err(|e| download_error(repo, SAVED_ONNX_NAME, &e))?;
+    on_progress(DownloadPhase::OnnxFetched);
+
+    if cancel.load(Ordering::SeqCst) {
+        return Err(AppError::cancelled("モデルダウンロードがキャンセルされました"));
+    }
+
+    // 2) タグ定義を候補順に取得する。
+    let candidates = tag_definition_candidates(variant);
+    let mut tagdef: Option<(&'static str, Vec<u8>)> = None;
+    let mut last_err: Option<DownloadError> = None;
+    for &name in candidates {
+        match fetch_with_retry(downloader, repo, name) {
+            Ok(bytes) => {
+                tagdef = Some((name, bytes));
+                break;
+            }
+            Err(e) => last_err = Some(e),
+        }
+    }
+    let (tagdef_name, tagdef_bytes) = match tagdef {
+        Some(v) => v,
+        None => {
+            let e = last_err.unwrap_or(DownloadError::Other(
+                "タグ定義の候補がありません".to_string(),
+            ));
+            return Err(download_error(
+                repo,
+                candidates.first().copied().unwrap_or("tag-definition"),
+                &e,
+            ));
+        }
+    };
+    on_progress(DownloadPhase::TagDefinitionFetched);
+
+    if cancel.load(Ordering::SeqCst) {
+        return Err(AppError::cancelled("モデルダウンロードがキャンセルされました"));
+    }
+
+    // 3) 取得済みバイト列を原子的に保存する。
+    let onnx_dest = dest_dir.join(SAVED_ONNX_NAME);
+    let tagdef_dest = dest_dir.join(tagdef_name);
+
+    let save_result = (|| -> AppResult<()> {
+        atomic_write(&onnx_dest, &onnx_bytes)?;
+        atomic_write(&tagdef_dest, &tagdef_bytes)?;
+        Ok(())
+    })();
+
+    if let Err(e) = save_result {
+        let _ = std::fs::remove_file(&onnx_dest);
+        let _ = std::fs::remove_file(&tagdef_dest);
+        return Err(e);
+    }
+    on_progress(DownloadPhase::Saved);
+
+    Ok(dest_dir.to_path_buf())
+}
+
 /// [`DownloadError`] を要件 15.7 のダウンロード失敗（`AppError::Download`）へ写像する。
 fn download_error(repo: &str, file: &str, e: &DownloadError) -> AppError {
     AppError::download(format!(
@@ -1209,7 +1341,7 @@ impl ModelDownloader for HfHubDownloader {
 }
 
 #[cfg(test)]
-mod download_model_tests {
+pub(crate) mod download_model_tests {
     use super::*;
     use std::cell::RefCell;
     use std::collections::HashMap;
@@ -1221,14 +1353,18 @@ mod download_model_tests {
     /// [`DownloadError::Other`] を返す。`always_fail` が設定されている場合は全ての
     /// 取得を指定エラーで失敗させ、`fetch` の呼び出し回数を記録する（再試行回数の
     /// 検証用）。
-    struct MockDownloader {
+    ///
+    /// `pub(crate)` として公開し、`commands::adapters` の
+    /// `spawn_model_download`/`download_model_with_progress` の単体テスト
+    /// （タスク 3.5）から実 HTTP ネットワークアクセスなしで再利用できるようにする。
+    pub(crate) struct MockDownloader {
         responses: HashMap<String, Vec<u8>>,
         always_fail: Option<DownloadError>,
         calls: RefCell<Vec<(String, String)>>,
     }
 
     impl MockDownloader {
-        fn with_responses(pairs: &[(&str, &[u8])]) -> Self {
+        pub(crate) fn with_responses(pairs: &[(&str, &[u8])]) -> Self {
             let mut responses = HashMap::new();
             for (name, bytes) in pairs {
                 responses.insert((*name).to_string(), bytes.to_vec());
@@ -1240,7 +1376,8 @@ mod download_model_tests {
             }
         }
 
-        fn always_failing(err: DownloadError) -> Self {
+        #[allow(dead_code)]
+        pub(crate) fn always_failing(err: DownloadError) -> Self {
             Self {
                 responses: HashMap::new(),
                 always_fail: Some(err),
@@ -1248,7 +1385,8 @@ mod download_model_tests {
             }
         }
 
-        fn call_count(&self) -> usize {
+        #[allow(dead_code)]
+        pub(crate) fn call_count(&self) -> usize {
             self.calls.borrow().len()
         }
     }

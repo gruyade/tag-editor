@@ -15,9 +15,11 @@
 //!    登録する（要件 16.1, 16.2）。
 //! 4. フォルダ選択のため tauri-plugin-dialog を初期化する（要件 1.3）。
 
+use std::sync::{Arc, Mutex};
+
 use crate::commands::progress::ProgressEmitter;
 use crate::commands::CancelRegistry;
-use crate::models::Progress;
+use crate::models::{LoadedModel, Progress};
 
 /// 進捗イベントをフロントエンドへ送出するイベント名。
 ///
@@ -50,6 +52,36 @@ impl ProgressEmitter for TauriProgressEmitter {
     }
 }
 
+/// ロード済みモデルセッションを保持するアプリ層状態管理（要件 2.4, 2.5）。
+///
+/// [`crate::models::LoadedModel`] は `ort::Session` を保持し非 serde・非 `Sync`
+/// （`ort::Session::run` が `&mut` 前提のため内部可変性を持つ）ため、`Mutex` で
+/// 包んで `tauri::State` として `manage` する。現状は選択中モデル単一保持で
+/// 最小結線し、複数モデルの同時保持が必要になれば `Mutex<HashMap<String,
+/// LoadedModel>>` へ拡張する。
+///
+/// `current` は `Arc<Mutex<...>>` で保持する。`tauri::State<'_, T>` は
+/// ライフタイム付きでバックグラウンドスレッドへ move できないため、
+/// [`start_inference`](crate::commands::adapters::start_inference) は
+/// [`ModelSessionState::current_slot`] で共有ハンドル（`Arc`）を取得し、
+/// スレッド内から `AppHandle` を経由せずに直接参照する
+/// （`AppHandle` 非依存の内部ロジックを単体テスト可能にするため）。
+#[derive(Default)]
+pub struct ModelSessionState {
+    /// 選択中モデルの実セッション。未ロード時は `None`。
+    pub current: Arc<Mutex<Option<LoadedModel>>>,
+}
+
+impl ModelSessionState {
+    /// `current` の共有ハンドル（`Arc`）を複製して返す。
+    ///
+    /// バックグラウンドスレッドへ move してモデルの take/書き戻しを行うために
+    /// 用いる（`tauri::State` 自体はスレッドへ move できないため）。
+    pub fn current_slot(&self) -> Arc<Mutex<Option<LoadedModel>>> {
+        Arc::clone(&self.current)
+    }
+}
+
 /// Tauri アプリを構築して起動する（実行時にシステム WebView を要する）。
 ///
 /// - キャンセルレジストリを `manage` し、キャンセルコマンドから参照可能にする。
@@ -65,12 +97,15 @@ impl ProgressEmitter for TauriProgressEmitter {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(CancelRegistry::new())
+        .manage(Arc::new(CancelRegistry::new()))
+        .manage(ModelSessionState::default())
         .invoke_handler(tauri::generate_handler![
             // FileService（要件 1, 2）
             crate::commands::adapters::list_images,
             crate::commands::adapters::get_thumbnail,
             crate::commands::adapters::get_preview,
+            crate::commands::adapters::get_thumbnail_path,
+            crate::commands::adapters::get_preview_path,
             crate::commands::adapters::read_tag_file,
             crate::commands::adapters::write_tag_file,
             // TagService（要件 3, 6, 12）
@@ -93,6 +128,9 @@ pub fn run() {
             crate::commands::adapters::list_models,
             crate::commands::adapters::load_local_model,
             crate::commands::adapters::download_model,
+            // 推論起動・モデルダウンロード spawn（要件 2.1, 2.7）
+            crate::commands::adapters::start_inference,
+            crate::commands::adapters::spawn_model_download,
             // PlatformService（要件 13, 16.6）
             crate::commands::adapters::capabilities,
             crate::commands::adapters::create_symlink,

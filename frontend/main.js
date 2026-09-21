@@ -12,7 +12,7 @@
 // - 画像なし / フォルダ読取不可のメッセージ表示（要件 1.7, 1.8）
 // - 保存成功 / 失敗表示（要件 2.5）
 
-const { invoke } = window.__TAURI__.core;
+const { invoke, convertFileSrc } = window.__TAURI__.core;
 const dialog = window.__TAURI__.dialog;
 // 進捗イベント購読に使用（推論/バッチパネル、要件 16.7, 17.6）。
 const tauriEvent = window.__TAURI__.event;
@@ -49,6 +49,9 @@ const state = {
   // 進行中の推論 operation_id とイベント購読解除関数（キャンセル用）。
   inferOperationId: null,
   inferUnlisten: null,
+  // 進行中のモデルダウンロード operation_id とイベント購読解除関数。
+  downloadOperationId: null,
+  downloadUnlisten: null,
   // 検出済みモデル一覧（download_model へ渡す ModelVariant を保持）。
   models: { available: [], excluded: [] },
   // 検出済み孤立キャプションのパス一覧（承認削除用）。
@@ -220,16 +223,20 @@ function renderGrid() {
   }
 }
 
-/** 単一サムネイルを取得して差し込む。失敗時は代替表示のまま残す（要件 1.6）。 */
+/**
+ * 単一サムネイルを取得して差し込む。失敗時は代替表示のまま残す（要件 1.6）。
+ * サムネイルは軽量転送経路（要件 2.10, 2.11, 2.12）を用い、Rust 側がキャッシュへ
+ * 書き出したファイルパスを `convertFileSrc`（asset protocol）経由で `<img src>`
+ * に直接割り当てる（JSON 数値配列・手動 Base64 化は経ない）。
+ */
 async function loadThumbnail(path, cell, size) {
   try {
-    const thumb = await invoke("get_thumbnail", { path, size });
-    const url = thumb.placeholder ? null : pngBytesToDataUrl(thumb.png);
+    const result = await invoke("get_thumbnail_path", { path, size });
     const holder = cell.querySelector(".placeholder, img");
     if (!holder) return;
-    if (url) {
+    if (!result.placeholder) {
       const img = document.createElement("img");
-      img.src = url;
+      img.src = convertFileSrc(result.path);
       img.alt = "";
       holder.replaceWith(img);
     } else {
@@ -263,16 +270,19 @@ async function selectImage(path, cell) {
   loadTags(path);
 }
 
-/** 拡大プレビューを取得して表示する（要件 1.5）。 */
+/**
+ * 拡大プレビューを取得して表示する（要件 1.5）。
+ * 軽量転送経路（要件 2.10, 2.11, 2.12）を用い、`convertFileSrc` でファイル
+ * パスを直接 `<img src>` に割り当てる（JSON 数値配列・手動 Base64 化は経ない）。
+ */
 async function loadPreview(path) {
   els.preview.classList.remove("show");
   els.previewEmpty.textContent = "プレビューを読み込み中…";
   els.previewEmpty.style.display = "block";
   try {
-    const preview = await invoke("get_preview", { path });
-    const url = preview.placeholder ? null : pngBytesToDataUrl(preview.png);
-    if (url) {
-      els.preview.src = url;
+    const result = await invoke("get_preview_path", { path });
+    if (!result.placeholder) {
+      els.preview.src = convertFileSrc(result.path);
       els.preview.classList.add("show");
       els.previewEmpty.style.display = "none";
     } else {
@@ -932,18 +942,11 @@ ops.orphanDelete.addEventListener("click", async () => {
 
 // ---- 推論/バッチ（進捗・キャンセル・閾値・Batch_Size、要件 16.7, 17.6, 17.7） ----
 //
-// 注意（TODO / 設計上の制約）:
-//   現状の Rust 側には run_inference を直接呼ぶ #[tauri::command] アダプタが
-//   存在しない（バッチ推論はアプリ層の spawn_inference_job 経由で起動される
-//   設計、src-tauri/src/commands/adapters.rs 参照）。そのため本パネルの実行
-//   ボタンからは invoke("run_inference") を呼べない。ここでは要件に沿って
-//   以下を配線する:
-//     - 進捗イベント `inference://progress` の購読（done/total 表示、要件 16.7, 17.6）
-//     - キャンセルボタン → cancel_operation コマンド（要件 17.7）
-//     - 閾値スライダ・Batch_Size・モデル選択の UI（採用値の受け渡し準備）
-//   実際のバッチ実行トリガ（run_inference の起動）はアプリ層の spawn に委ねる
-//   （Rust は変更しない）。アプリ層が operation_id を払い出したら、その値を
-//   本 UI へ渡すことで進捗購読とキャンセルが機能する。
+// バッチ推論の起動は #[tauri::command] start_inference（src-tauri/src/commands/
+// adapters.rs）へ委譲する。operation_id 発行・進捗購読開始の後に invoke で
+// start_inference を呼び、Rust 側がバックグラウンドスレッドで spawn_inference_job
+// を起動する（要件 2.1, 2.2, 2.3）。セッション未ロードなど呼び出し自体が失敗
+// した場合は renderError で表示し、ボタン活性化/購読解除を行う（要件 2.6）。
 
 ops.inferThreshold.addEventListener("input", () => {
   ops.inferThresholdValue.textContent = Number(ops.inferThreshold.value).toFixed(2);
@@ -1017,8 +1020,7 @@ ops.inferRun.addEventListener("click", async () => {
     return;
   }
 
-  // operation_id を払い出し、進捗購読とキャンセルを配線する。
-  // 実バッチ実行の起動はアプリ層の spawn（run_inference）に委ねる（Rust 未変更）。
+  // operation_id を払い出し、進捗購読とキャンセルを配線した後に実推論を起動する。
   state.inferOperationId = "infer-" + Date.now();
   ops.inferRun.disabled = true;
   ops.inferCancel.disabled = false;
@@ -1028,11 +1030,21 @@ ops.inferRun.addEventListener("click", async () => {
     ops.inferResult,
     `推論を要求（対象 ${targets.length} 件, 閾値 ${threshold.toFixed(2)}` +
       (batchSize !== null ? `, Batch_Size ${batchSize}` : "") +
-      `, モデル ${modelId}）。進捗イベントを購読中。` +
-      "\n※ 実バッチ実行トリガはアプリ層の spawn が起動します（operation_id=" +
-      state.inferOperationId +
-      "）。"
+      `, モデル ${modelId}）。進捗イベントを購読中。`
   );
+
+  try {
+    await invoke("start_inference", {
+      imagePaths: targets,
+      threshold,
+      batchSize,
+      operationId: state.inferOperationId,
+    });
+  } catch (err) {
+    // モデル未ロード等で起動自体が失敗した場合（要件 2.6）。
+    renderError(ops.inferResult, err);
+    finishInference();
+  }
 });
 
 ops.inferCancel.addEventListener("click", async () => {
@@ -1134,6 +1146,39 @@ ops.modelLoadLocal.addEventListener("click", async () => {
   }
 });
 
+/**
+ * モデルダウンロードの進捗イベント購読を開始する（要件 2.8）。
+ * `inference://progress` は推論と共通のイベント名のため operation_id で
+ * フィルタする。done>=total（3 段階完了、adapters.rs の spawn_model_download
+ * 参照）を検知したら completeCallback を呼ぶ。
+ */
+async function startDownloadProgressSubscription(operationId, completeCallback) {
+  await stopDownloadProgressSubscription();
+  state.downloadUnlisten = await tauriEvent.listen("inference://progress", (evt) => {
+    const p = evt.payload || {};
+    if (p.operation_id !== operationId) return;
+    const total = p.total || 0;
+    const done = p.done || 0;
+    ops.modelResult.textContent =
+      total > 0 ? `ダウンロード中… (${done} / ${total})` : "ダウンロード中…";
+    if (total > 0 && done >= total) {
+      completeCallback();
+    }
+  });
+}
+
+/** モデルダウンロードの進捗購読を解除する。 */
+async function stopDownloadProgressSubscription() {
+  if (state.downloadUnlisten) {
+    try {
+      state.downloadUnlisten();
+    } catch {
+      /* 解除失敗は無視 */
+    }
+    state.downloadUnlisten = null;
+  }
+}
+
 ops.modelDownload.addEventListener("click", async () => {
   const variant = selectedVariant();
   if (!variant) {
@@ -1151,12 +1196,30 @@ ops.modelDownload.addEventListener("click", async () => {
   if (!destDir) return;
   ops.modelResult.classList.remove("err");
   ops.modelResult.textContent = "ダウンロード中…";
-  try {
-    const saved = await invoke("download_model", { variant, destDir });
-    renderText(ops.modelResult, `ダウンロード完了: ${saved}`, true);
+
+  const operationId = "download-" + Date.now();
+  state.downloadOperationId = operationId;
+  ops.modelDownload.disabled = true;
+
+  await startDownloadProgressSubscription(operationId, () => {
+    // 完了検知（要件 2.8）。Rust 側（spawn_model_download）が保存先ディレクトリを
+    // model_service::load_local_model へ渡し、ModelSessionState へ保持済み
+    // （期待 2.5）のため、フロント側で追加の load_local_model 呼び出しは不要。
+    renderText(ops.modelResult, `ダウンロード完了: ${destDir}`, true);
+    stopDownloadProgressSubscription();
+    state.downloadOperationId = null;
+    ops.modelDownload.disabled = false;
     refreshModels();
+  });
+
+  try {
+    // 別スレッドで spawn し即戻る（要件 2.7）。完了検知は進捗イベントで行う。
+    await invoke("spawn_model_download", { variant, destDir, operationId });
   } catch (err) {
     renderError(ops.modelResult, err);
+    stopDownloadProgressSubscription();
+    state.downloadOperationId = null;
+    ops.modelDownload.disabled = false;
   }
 });
 

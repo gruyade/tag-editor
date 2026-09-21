@@ -258,6 +258,109 @@ impl SessionRunner for OrtSessionRunner<'_> {
     }
 }
 
+/// 所有 `LoadedModel` を包む `Send` な [`SessionRunner`] 実装（タスク 3.3）。
+///
+/// [`OrtSessionRunner`] は `&'a mut ort::session::Session` を借用するため
+/// ライフタイム付きで `'static` を満たさず、
+/// `spawn_inference_job<R: SessionRunner + Send + 'static>` へスレッド move
+/// できない。本型は [`crate::models::LoadedModel`] を所有権ごと保持することで
+/// `'static + Send` を満たし、`spawn_inference_job` にそのまま渡せる。
+///
+/// 実行ロジック（テンソル構築・推論・出力抽出）は [`OrtSessionRunner::run`] と
+/// 同一の契約（入力長検証・単一入力/単一出力・NHWC）に従う。同期コア
+/// （[`SessionRunner`] トレイト・[`crate::commands::adapters::run_inference_job`]）
+/// は変更せず、本型は新規実装として追加する。
+pub struct OwnedOrtRunner {
+    /// 所有するロード済みモデル（`ort::session::Session` を含む）。
+    /// `Session::run` が `&mut self` を要するため [`RefCell`] で内部可変性を
+    /// 与え、[`SessionRunner::run`] の `&self` 契約を保つ。
+    pub model: std::cell::RefCell<crate::models::LoadedModel>,
+}
+
+impl OwnedOrtRunner {
+    /// 所有 `LoadedModel` から実行器を生成する。
+    pub fn new(model: crate::models::LoadedModel) -> Self {
+        Self {
+            model: std::cell::RefCell::new(model),
+        }
+    }
+
+    /// 内部の `LoadedModel` を取り出し、所有権を呼び出し元へ返す。
+    ///
+    /// 推論完了後にモデルを `ModelSessionState` へ戻す用途に用いる。
+    pub fn into_inner(self) -> crate::models::LoadedModel {
+        self.model.into_inner()
+    }
+}
+
+impl SessionRunner for OwnedOrtRunner {
+    fn run(&self, input: &[f32]) -> AppResult<Vec<f32>> {
+        use ort::value::TensorRef;
+
+        let mut model = self.model.borrow_mut();
+        let side = model.input_size as usize;
+        let expected = side * side * 3;
+        if input.len() != expected {
+            return Err(AppError::invalid_input(format!(
+                "前処理テンソル長 {} が期待値 {} と一致しない",
+                input.len(),
+                expected
+            )));
+        }
+
+        // NHWC: [batch=1, H, W, C=3]。
+        let shape = [1_i64, side as i64, side as i64, 3];
+        let tensor = TensorRef::from_array_view((shape, input))
+            .map_err(|e| AppError::model_load(format!("入力テンソル構築に失敗: {e}")))?;
+
+        // 単一入力・単一出力を前提に、最初の入力名へ束ねて実行する。
+        let input_name = model
+            .session
+            .inputs()
+            .first()
+            .map(|i| i.name().to_string())
+            .ok_or_else(|| AppError::model_load("モデルに入力が定義されていない"))?;
+
+        let outputs = model
+            .session
+            .run(ort::inputs![input_name.as_str() => tensor])
+            .map_err(|e| AppError::model_load(format!("推論実行に失敗: {e}")))?;
+
+        // 最初の出力テンソルを確信度ベクトルとして取り出す。
+        let output = outputs
+            .iter()
+            .next()
+            .ok_or_else(|| AppError::model_load("モデル出力が空"))?;
+        let (_shape, data) = output
+            .1
+            .try_extract_tensor::<f32>()
+            .map_err(|e| AppError::model_load(format!("出力テンソル抽出に失敗: {e}")))?;
+
+        Ok(data.to_vec())
+    }
+}
+
+#[cfg(test)]
+mod owned_ort_runner_tests {
+    use super::*;
+
+    /// `OwnedOrtRunner` が `Send + 'static` を満たし、
+    /// `spawn_inference_job<R: SessionRunner + Send + 'static>` の境界を
+    /// 満たすことをコンパイル時に検証する（実 ort セッションは要さない）。
+    #[test]
+    fn owned_ort_runner_satisfies_send_static_bound() {
+        fn assert_send_static<T: Send + 'static>() {}
+        assert_send_static::<OwnedOrtRunner>();
+    }
+
+    /// `SessionRunner` トレイトを実装していることをコンパイル時に検証する。
+    #[test]
+    fn owned_ort_runner_implements_session_runner() {
+        fn assert_impl<T: SessionRunner>() {}
+        assert_impl::<OwnedOrtRunner>();
+    }
+}
+
 #[cfg(test)]
 mod preprocess_tests {
     use super::*;
