@@ -648,7 +648,7 @@ fn start_inference_core<R, PR, RS, EM, OC>(
     filter: crate::models::TagFilter,
     batch_size: Option<u32>,
     operation_id: String,
-) -> AppResult<()>
+) -> AppResult<std::thread::JoinHandle<()>>
 where
     R: crate::services::inference_service::SessionRunner + Send + 'static,
     PR: FnOnce() -> AppResult<InferenceRunnerSetup<R>> + Send + 'static,
@@ -659,7 +659,13 @@ where
     // runner の準備（遅延 DL + load）と推論をバックグラウンドスレッドで実行し、
     // UI スレッドを塞がない。準備が失敗（Assets 不在・DL 失敗・読込失敗）した
     // 場合は推論を一切実行せずスレッドを終了する（要件 4.4, 4.5, 7.3, 7.5）。
-    std::thread::spawn(move || {
+    //
+    // 起動したスレッドの [`JoinHandle`] を返す。本番の [`start_inference`] は
+    // これを捨ててデタッチ相当にする（UI スレッドを塞がない）。テストは `join`
+    // でスレッド終了（emitter の Drop・restore・on_complete 完了）を確実に待つ
+    // ことで、テスト関数終了後に走り続けるデタッチスレッドが共有状態を汚染し
+    // 並列実行下で二重パニック（Linux で SIGABRT）を起こすのを防ぐ。
+    let handle = std::thread::spawn(move || {
         let setup = match prepare_runner() {
             Ok(setup) => setup,
             Err(_err) => {
@@ -689,7 +695,7 @@ where
         on_complete(&result);
     });
 
-    Ok(())
+    Ok(handle)
 }
 
 /// バッチ推論をローカルモデルで起動する（要件 4.1〜4.5, 7.1, 7.3, 7.5）。
@@ -843,6 +849,9 @@ pub fn start_inference(
         batch_size,
         operation_id,
     )
+    // 本番ではバックグラウンドスレッドをデタッチする（UI スレッドを塞がない）。
+    // JoinHandle は破棄し、推論はスレッド完了とともに自然終了する。
+    .map(|_handle| ())
 }
 
 // ---------------------------------------------------------------------------
@@ -1537,13 +1546,17 @@ mod tests {
             "loaded-job".to_string(),
         );
 
-        assert!(result.is_ok());
+        let handle = result.expect("推論起動は成功する");
 
         // restore が呼ばれる（=モデル相当の状態が再利用可能な状態に戻る）まで待つ。
         let signal = restore_rx
             .recv_timeout(std::time::Duration::from_secs(5))
             .expect("restore が時間内に呼ばれなかった");
         assert_eq!(signal, "restored");
+
+        // バックグラウンドスレッドの完了を確実に待つ（デタッチスレッドがテスト
+        // 関数終了後も走り続けて共有状態を汚染するのを防ぐ）。
+        handle.join().expect("推論スレッドが panic した");
 
         // restore は run_inference_job 完了後に呼ばれるため、この時点で
         // レジストリは解放済み・進捗は蓄積済みのはず（emit は共有 Vec への即時
@@ -2027,13 +2040,17 @@ mod tests {
         );
 
         // 推論起動呼び出し自体は成功して即座に戻る（UI スレッドを塞がない）。
-        assert!(result.is_ok());
+        let handle = result.expect("推論起動は成功する");
 
         // 「完了」: 状態復元が呼ばれるまで待つ。
         let signal = restore_rx
             .recv_timeout(Duration::from_secs(5))
             .expect("推論完了後の状態復元が時間内に行われなかった");
         assert_eq!(signal, "restored");
+
+        // バックグラウンドスレッドの完了を確実に待つ（Reporting エミッタの Drop
+        // による進捗送出もここで完了する）。
+        handle.join().expect("推論スレッドが panic した");
 
         // 「進捗更新」: 進捗が単調に増加し、最終的に done==total で通知される。
         let events = progress_rx
@@ -2140,7 +2157,7 @@ mod tests {
             Some(1),
             operation_id.clone(),
         );
-        assert!(result.is_ok());
+        let handle = result.expect("推論起動は成功する");
 
         // 最初の進捗（1 バッチ完了）を確認したら、UI スレッド相当から
         // キャンセルを要求する。
@@ -2157,6 +2174,9 @@ mod tests {
             .recv_timeout(Duration::from_secs(5))
             .expect("キャンセル後の状態復元が時間内に行われなかった");
         assert_eq!(signal, "restored");
+
+        // バックグラウンドスレッドの完了を確実に待つ。
+        handle.join().expect("推論スレッドが panic した");
 
         // 完了後にキャンセルレジストリは解放され、セッションは復元されている。
         assert!(registry.is_empty());
@@ -2255,10 +2275,13 @@ mod tests {
             "e2e-download-then-infer".to_string(),
         );
 
-        assert!(infer_result.is_ok());
+        let infer_handle = infer_result.expect("推論起動は成功する");
         let signal = restore_rx
             .recv_timeout(Duration::from_secs(5))
             .expect("ダウンロード済みモデルでの推論完了が時間内に行われなかった");
         assert_eq!(signal, "restored");
+
+        // バックグラウンドスレッドの完了を確実に待つ。
+        infer_handle.join().expect("推論スレッドが panic した");
     }
 }

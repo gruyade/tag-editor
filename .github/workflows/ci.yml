@@ -40,7 +40,14 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run cargo test (workspace)
-        run: cargo test --workspace --verbose
+        # --release で実行する。画像プロパティテスト（サムネイル/プレビュー生成）は
+        # debug ビルドの image クレートが極端に遅く、テスト全体のボトルネックになる
+        # ため、ネイティブ最適化で桁違いに高速化する。
+        # 以前は SIGABRT 回避のため --test-threads=1 を使っていたが、原因だった
+        # デタッチスレッド（テスト関数終了後も走り続けるバックグラウンド推論
+        # スレッド）を JoinHandle の join で確実に回収するようテストを修正した
+        # ため、並列実行へ戻している。
+        run: cargo test --workspace --release --verbose
 
   build:
     name: Build (${{ matrix.os }})
