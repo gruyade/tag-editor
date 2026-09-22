@@ -1,12 +1,12 @@
-//! 閾値採用・動画除外・Batch_Size 解決・バッチ分割（タスク 8）。
+//! 動画除外・Batch_Size 解決・バッチ分割（タスク 8）。
 //!
 //! ファイル I/O や推論に依存しない決定的関数群。
-//! - 信頼度閾値によるタグ採用（要件 14.4）
 //! - 動画（mp4）ファイルの推論除外（要件 14.8）
 //! - Batch_Size の解決（要件 17.3, 17.4, 17.5）
 //! - バッチ分割（要件 17.2）
-
-use crate::models::Tag;
+//!
+//! 【移行】閾値採用ロジック（旧 `adopt_by_threshold`）は
+//! [`crate::logic::tag_filter::apply_filter`] へ統合済みのため本モジュールから削除した。
 
 /// Batch_Size の既定値（要件 17.4）。
 pub const DEFAULT_BATCH_SIZE: u32 = 8;
@@ -16,34 +16,6 @@ pub const MIN_BATCH_SIZE: u32 = 1;
 
 /// Batch_Size の上限（要件 17.3）。
 pub const MAX_BATCH_SIZE: u32 = 64;
-
-/// 信頼度が閾値以上のタグのみを採用する（要件 14.4）。
-///
-/// 各タグについて、信頼度が `threshold` 以上（`confidence >= threshold`）のもの
-/// だけを採用し、順序を保存したまま返す。
-///
-/// # 信頼度なしタグの扱い
-///
-/// 推論結果は常に信頼度を伴う想定だが、[`Tag::confidence`] が `None` のタグも
-/// 安全に扱う。信頼度が無いタグは「閾値と比較できない」ため採用しない
-/// （閾値を満たすことを確認できない項目は不採用とする保守的な方針）。
-/// これにより Property 22（採用集合＝信頼度が閾値以上のタグ集合）が
-/// 信頼度付きタグに対して厳密に成立する。
-///
-/// # 引数
-///
-/// - `tags`: 判定対象のタグ列（閾値適用前の全確信度）。
-/// - `threshold`: 採用の下限信頼度（0.0〜1.0 を想定）。
-///
-/// # 戻り値
-///
-/// 採用されたタグの複製列（入力順を保存）。
-pub fn adopt_by_threshold(tags: &[Tag], threshold: f32) -> Vec<Tag> {
-    tags.iter()
-        .filter(|tag| matches!(tag.confidence, Some(c) if c >= threshold))
-        .cloned()
-        .collect()
-}
 
 /// パスが動画（mp4）拡張子かどうかを判定する（要件 14.8）。
 ///
@@ -107,76 +79,6 @@ pub fn resolve_batch_size(requested: Option<u32>) -> u32 {
 pub fn split_into_batches<T: Clone>(items: &[T], batch_size: u32) -> Vec<Vec<T>> {
     let chunk = (batch_size.max(1)) as usize;
     items.chunks(chunk).map(<[T]>::to_vec).collect()
-}
-
-#[cfg(test)]
-mod adopt_by_threshold_tests {
-    use super::*;
-
-    #[test]
-    fn adopts_tags_at_or_above_threshold() {
-        let tags = vec![
-            Tag::with_confidence("a", 0.9),
-            Tag::with_confidence("b", 0.5),
-            Tag::with_confidence("c", 0.3),
-        ];
-        let adopted = adopt_by_threshold(&tags, 0.5);
-        let bodies: Vec<&str> = adopted.iter().map(|t| t.body.as_str()).collect();
-        assert_eq!(bodies, vec!["a", "b"]);
-    }
-
-    #[test]
-    fn threshold_boundary_is_inclusive() {
-        // 信頼度がちょうど閾値のタグは採用する（>= 判定）。
-        let tags = vec![Tag::with_confidence("a", 0.5)];
-        assert_eq!(adopt_by_threshold(&tags, 0.5).len(), 1);
-    }
-
-    #[test]
-    fn threshold_zero_adopts_all_with_confidence() {
-        let tags = vec![
-            Tag::with_confidence("a", 0.0),
-            Tag::with_confidence("b", 1.0),
-        ];
-        assert_eq!(adopt_by_threshold(&tags, 0.0).len(), 2);
-    }
-
-    #[test]
-    fn threshold_one_adopts_only_perfect() {
-        let tags = vec![
-            Tag::with_confidence("a", 1.0),
-            Tag::with_confidence("b", 0.99),
-        ];
-        let adopted = adopt_by_threshold(&tags, 1.0);
-        let bodies: Vec<&str> = adopted.iter().map(|t| t.body.as_str()).collect();
-        assert_eq!(bodies, vec!["a"]);
-    }
-
-    #[test]
-    fn tags_without_confidence_are_not_adopted() {
-        // 信頼度なしのタグは閾値と比較できないため採用しない。
-        let tags = vec![Tag::new("a"), Tag::with_confidence("b", 0.9)];
-        let adopted = adopt_by_threshold(&tags, 0.0);
-        let bodies: Vec<&str> = adopted.iter().map(|t| t.body.as_str()).collect();
-        assert_eq!(bodies, vec!["b"]);
-    }
-
-    #[test]
-    fn preserves_input_order() {
-        let tags = vec![
-            Tag::with_confidence("z", 0.9),
-            Tag::with_confidence("a", 0.9),
-            Tag::with_confidence("m", 0.9),
-        ];
-        let adopted = adopt_by_threshold(&tags, 0.5);
-        let bodies: Vec<&str> = adopted.iter().map(|t| t.body.as_str()).collect();
-        assert_eq!(bodies, vec!["z", "a", "m"]);
-    }
-
-    #[test]
-    fn empty_input_yields_empty() {
-        assert!(adopt_by_threshold(&[], 0.5).is_empty());
-    }
 }
 
 #[cfg(test)]

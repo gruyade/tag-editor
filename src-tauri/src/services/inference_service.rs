@@ -544,38 +544,26 @@ mod inference_mapping_tests {
 // - キャンセルフラグをバッチ境界で確認し、要求されていれば未処理を中止する
 //   （要件 17.7）。
 
-use crate::logic::inference_aux::{
-    adopt_by_threshold, exclude_videos, resolve_batch_size, split_into_batches,
-};
+use crate::logic::inference_aux::{exclude_videos, resolve_batch_size, split_into_batches};
+use crate::logic::tag_batch::{apply_fraction_threshold, build_overview};
+use crate::logic::tag_filter::apply_filter;
 use crate::logic::tag_format::render_tags;
-use crate::models::Progress;
+use crate::models::{FilterOutcome, InferBatchResult, Progress, TagFilter, TagOverview};
+use crate::services::tag_file::write_tag_file;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// [`run_inference`] の結果。
-///
-/// 単一/バッチ推論の集計結果を保持する。UI へは件数と付随メッセージを提示する。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct InferResult {
-    /// Tag_File 書込まで成功した件数。
-    pub succeeded: usize,
-    /// 読込不可・推論失敗・書込失敗でスキップした件数（要件 14.3, 14.7, 17.8）。
-    pub failed: usize,
-    /// mp4 除外により推論対象から外した件数（要件 14.8）。
-    pub excluded: usize,
-    /// キャンセルにより未処理のまま中止した件数（要件 17.7）。
-    pub cancelled: usize,
-    /// 付随メッセージ（失敗理由など）。
-    pub messages: Vec<String>,
-}
-
-/// 複数画像に対して推論を実行し、採用タグを同名 Tag_File へ書き込む。
+/// 複数画像に対して推論を実行し、Tag_Filter / Fraction_Threshold を適用した
+/// 採用タグを同名 Tag_File へ書き込み、バッチ後のタグ一覧を返す。
 ///
 /// # 引数
 ///
 /// - `runner`: セッション実行の抽象（実 ort もモックも可）。1 画像分の前処理済み
-///   テンソルを受け取り確信度ベクトルを返す。
+///   テンソルを受け取り確信度ベクトルを返す。常に `runner`（`variant_dir` から
+///   ロードした `LoadedModel`）のみを用い、Model_Source を参照しない（要件 7.1,
+///   7.2, 7.4）。
 /// - `image_paths`: 対象 Image_File のパス列。mp4 は除外される（要件 14.8）。
-/// - `threshold`: 採用の下限信頼度（0.0〜1.0）。これ以上のタグのみ採用（要件 14.4）。
+/// - `filter`: コンパイル済み Tag_Filter。各画像へ [`apply_filter`] を適用し
+///   （要件 9）、バッチなら [`apply_fraction_threshold`] を適用する（要件 10）。
 /// - `batch_size`: Batch_Size（未指定は既定 8、範囲 1〜64、範囲外は丸め）
 ///   （要件 17.3, 17.4, 17.5）。
 /// - `labels`: ラベル定義。確信度ベクトルと 1 対 1 対応する。
@@ -584,24 +572,37 @@ pub struct InferResult {
 /// - `cancel`: キャンセル要求フラグ。バッチ境界で確認する（要件 17.7）。
 /// - `progress`: 1 件処理ごとに `処理済み/総数` を通知するコールバック（要件 17.6）。
 ///
-/// # 並列前処理（要件 17.1）
+/// # 2 フェーズ構成
 ///
-/// 各バッチ内の画像読込＋前処理は rayon の並列イテレータで実行する。個々の
-/// 画像読込結果（成功/失敗）は入力順を保ったまま集約し、以降の逐次処理
-/// （推論・書込・進捗通知）へ渡す。これにより順序と決定的な進捗通知を保つ。
+/// Fraction_Threshold はバッチ全体（全対象画像）の集計後に適用する必要があるため、
+/// 処理を 2 フェーズに分ける。
+///
+/// 1. **推論フェーズ**: mp4 除外後の対象をバッチへ分割し、バッチ内の画像読込＋
+///    前処理を rayon で並列実行（要件 17.1）、逐次に推論して [`apply_filter`] で
+///    [`FilterOutcome`] を得て `per_image` に集約する。読込/推論に失敗した画像は
+///    スキップして件数だけ記録し、`per_image` には含めない（要件 14.3, 14.7,
+///    17.8）。進捗は画像 1 件ごとに通知し（要件 17.6）、キャンセルはバッチ境界で
+///    確認する（要件 17.7）。
+/// 2. **集計・書込フェーズ**: `per_image` へ [`apply_fraction_threshold`] を適用し
+///    （`image_count` は成功画像数。1 なら内部で非適用、要件 10.4）、最終
+///    Adopted_Tags を [`render_tags`] + [`write_tag_file`] で同名 Tag_File へ書き込む
+///    （要件 9.9）。書込に失敗した画像は成功件数から外し失敗として記録する。
+///    最後に [`build_overview`] で Tag_Overview を構築する（要件 11.1）。
 ///
 /// # 進捗の総数
 ///
 /// 進捗の総数は mp4 除外後の対象件数とする。除外された mp4 は総数に含めない。
+/// 進捗通知は推論フェーズで画像ごとに行い、`done` が `total` に達する。
 ///
 /// # 戻り値
 ///
-/// [`InferResult`]。成功/失敗/除外/キャンセル件数と付随メッセージを保持する。
+/// [`InferBatchResult`]。成功/失敗/除外/キャンセル件数・付随メッセージに加え、
+/// バッチ後のタグ一覧 `overview` を保持する（要件 11.1）。
 #[allow(clippy::too_many_arguments)]
 pub fn run_inference(
     runner: &dyn SessionRunner,
     image_paths: &[String],
-    threshold: f32,
+    filter: &TagFilter,
     batch_size: Option<u32>,
     labels: &[LabelDef],
     input_size: u32,
@@ -609,7 +610,7 @@ pub fn run_inference(
     operation_id: &str,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(Progress),
-) -> InferResult {
+) -> InferBatchResult {
     use rayon::prelude::*;
 
     // mp4 を推論対象から除外する（要件 14.8）。
@@ -617,15 +618,25 @@ pub fn run_inference(
     let excluded = image_paths.len() - targets.len();
 
     let total = targets.len();
-    let mut result = InferResult {
+    let mut result = InferBatchResult {
+        succeeded: 0,
+        failed: 0,
         excluded,
-        ..Default::default()
+        cancelled: 0,
+        messages: Vec::new(),
+        overview: TagOverview {
+            adopted: Vec::new(),
+            discarded: Vec::new(),
+        },
     };
 
     // Batch_Size を解決し、対象をバッチへ分割する（要件 17.2, 17.3, 17.4, 17.5）。
     let resolved_batch = resolve_batch_size(batch_size);
     let batches = split_into_batches(&targets, resolved_batch);
 
+    // フェーズ 1: 推論して画像ごとの FilterOutcome を集約する。
+    // 書込対象を保つため (パス, FilterOutcome) の順序付き列として持つ。
+    let mut per_image: Vec<(String, FilterOutcome)> = Vec::new();
     let mut done = 0usize;
 
     for batch in &batches {
@@ -651,7 +662,7 @@ pub fn run_inference(
             })
             .collect();
 
-        // 逐次に推論・採用・書込・進捗通知を行う（決定的な進捗のため順序保存）。
+        // 逐次に推論・フィルタ・進捗通知を行う（決定的な進捗のため順序保存）。
         for (path, pre) in preprocessed {
             match pre {
                 // 読込/前処理失敗はスキップ＋記録（要件 14.7, 17.8）。
@@ -666,18 +677,9 @@ pub fn run_inference(
                         result.messages.push(format!("{path}: 推論に失敗: {e}"));
                     }
                     Ok(tags) => {
-                        // 閾値以上のタグのみ採用（要件 14.4）。
-                        let adopted = adopt_by_threshold(&tags, threshold);
-                        // 採用タグを `, ` 連結で描画（信頼度は付けず本体のみ）。
-                        let content = render_tags(&adopted, false);
-                        // 採用タグを同名 Tag_File へ書込（既存は上書き）（要件 14.5, 14.6）。
-                        match crate::services::tag_file::write_tag_file(&path, &content) {
-                            Ok(()) => result.succeeded += 1,
-                            Err(e) => {
-                                result.failed += 1;
-                                result.messages.push(format!("{path}: 書込に失敗: {e}"));
-                            }
-                        }
+                        // Tag_Filter を適用して採用/不採用を得る（要件 9）。
+                        let outcome = apply_filter(filter, &tags);
+                        per_image.push((path, outcome));
                     }
                 },
             }
@@ -692,13 +694,55 @@ pub fn run_inference(
         }
     }
 
+    // フェーズ 2: Fraction_Threshold をバッチ全体で適用し、最終採用を書き込む。
+    // image_count は推論に成功した画像数（単一なら内部で非適用、要件 10.4）。
+    let (paths, outcomes): (Vec<String>, Vec<FilterOutcome>) = per_image.into_iter().unzip();
+    let batch_outcome = apply_fraction_threshold(&outcomes, filter, paths.len());
+
+    // 各画像の最終 Adopted_Tags を同名 Tag_File へ書込む（要件 9.9）。
+    for (path, outcome) in paths.iter().zip(batch_outcome.per_image.iter()) {
+        // 採用タグを `, ` 連結で描画（信頼度は付けず本体のみ）。
+        let content = render_tags(&outcome.adopted, false);
+        // 採用タグを同名 Tag_File へ書込（既存は上書き）（要件 9.9, 14.5, 14.6）。
+        match write_tag_file(path, &content) {
+            Ok(()) => result.succeeded += 1,
+            Err(e) => {
+                result.failed += 1;
+                result.messages.push(format!("{path}: 書込に失敗: {e}"));
+            }
+        }
+    }
+
+    // バッチ後のタグ一覧を構築する（要件 11.1）。
+    result.overview = build_overview(&batch_outcome);
+
     result
 }
 
 #[cfg(test)]
 mod run_inference_tests {
     use super::*;
+    use crate::logic::tag_filter::compile_filter;
+    use crate::models::RawTagFilter;
     use crate::models::TagCategory;
+
+    /// Confidence_Threshold のみを設定した TagFilter を作るヘルパー。
+    ///
+    /// 旧テストの `threshold: f32` 引数と等価な採用挙動を得るため、keep/exclude/
+    /// replace/additional を空、fraction_threshold を 0（非適用）にする。
+    fn threshold_filter(threshold: f32) -> TagFilter {
+        let raw = RawTagFilter {
+            keep: Vec::new(),
+            exclude: Vec::new(),
+            replace: Vec::new(),
+            additional: Vec::new(),
+            confidence_threshold: threshold,
+            fraction_threshold: 0.0,
+        };
+        let (filter, invalid) = compile_filter(raw);
+        assert!(invalid.is_empty());
+        filter
+    }
     use image::{Rgb, RgbImage};
     use std::path::Path;
     use std::sync::atomic::AtomicBool;
@@ -770,7 +814,7 @@ mod run_inference_tests {
         let result = run_inference(
             &runner,
             &paths,
-            0.5,
+            &threshold_filter(0.5),
             None,
             &labels,
             4,
@@ -808,7 +852,7 @@ mod run_inference_tests {
         let result = run_inference(
             &runner,
             &paths,
-            0.5,
+            &threshold_filter(0.5),
             None,
             &labels,
             4,
@@ -842,7 +886,7 @@ mod run_inference_tests {
         run_inference(
             &runner,
             &paths,
-            0.9,
+            &threshold_filter(0.9),
             None,
             &labels,
             4,
@@ -881,7 +925,7 @@ mod run_inference_tests {
         let result = run_inference(
             &runner,
             &paths,
-            0.5,
+            &threshold_filter(0.5),
             None,
             &labels,
             4,
@@ -913,7 +957,7 @@ mod run_inference_tests {
         let result = run_inference(
             &runner,
             &paths,
-            0.5,
+            &threshold_filter(0.5),
             None,
             &labels,
             4,
@@ -956,7 +1000,7 @@ mod run_inference_tests {
         let result = run_inference(
             &runner,
             &paths,
-            0.5,
+            &threshold_filter(0.5),
             Some(1),
             &labels,
             4,
@@ -1003,7 +1047,7 @@ mod run_inference_tests {
         run_inference(
             &runner,
             &paths,
-            0.5,
+            &threshold_filter(0.5),
             Some(2),
             &labels,
             4,
@@ -1097,7 +1141,7 @@ mod run_inference_tests {
         let result = run_inference(
             &runner,
             &paths,
-            0.5,
+            &threshold_filter(0.5),
             Some(2),
             &labels,
             4,
@@ -1157,7 +1201,7 @@ mod run_inference_tests {
         let result = run_inference(
             &runner,
             &paths,
-            0.5,
+            &threshold_filter(0.5),
             Some(2),
             &labels,
             4,
@@ -1207,7 +1251,7 @@ mod run_inference_tests {
         let result = run_inference(
             &runner,
             &paths,
-            0.5,
+            &threshold_filter(0.5),
             Some(2),
             &labels,
             4,

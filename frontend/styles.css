@@ -422,6 +422,41 @@ fieldset.sub legend {
   font-size: 12px;
   padding: 0 6px;
 }
+
+/* ---- Tag_Filter パネル（タスク 17.1、要件 9.1/9.7） ---- */
+fieldset.sub.tag-filter .filter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.filter-field .filter-label {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.filter-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  resize: vertical;
+}
+@media (max-width: 720px) {
+  fieldset.sub.tag-filter .filter-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 hr.divider {
   border: none;
   border-top: 1px solid var(--border);
@@ -498,4 +533,83 @@ hr.divider {
 .progress-wrap progress {
   flex: 1;
   height: 14px;
+}
+
+/* ---- モデル管理（カタログ一覧・存在バッジ・DL/キャンセル・進捗、要件 1.1, 3.1, 5.1, 5.3） ---- */
+.model-catalog {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0;
+}
+/* 各バリアント行: 表示名 / 存在バッジ / 操作 / 進捗 を横並びに配置する。 */
+.model-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.model-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.model-name {
+  color: var(--text);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.model-family {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+/* 存在バッジ（Model_Present / Not_Present、要件 3.1）。 */
+.model-badge {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+.model-badge.present {
+  color: var(--ok);
+  background: rgba(78, 201, 176, 0.12);
+  border: 1px solid var(--ok);
+}
+.model-badge.not-present {
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border);
+}
+.model-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.model-actions button {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+/* 進捗バー（0〜100%、要件 5.3）。行全体の下段に敷く。 */
+.model-progress-wrap {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.model-progress {
+  flex: 1;
+  height: 12px;
+}
+.model-progress[hidden] {
+  display: none;
+}
+.model-progress-text {
+  min-width: 3em;
+  text-align: right;
 }

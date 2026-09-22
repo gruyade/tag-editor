@@ -11,7 +11,6 @@
 //        create_symlink / convert_path）
 //   3.2  同期コア（run_inference_job / spawn_inference_job）の進捗単調非減少・
 //        最終 done==total・キャンセル反映・部分失敗時の処理前状態保持
-//   3.3  list_models のローカル/リモート一覧と ONNX 非対応の available/excluded 区分
 //   3.4  LoadedModelInfo の input_size / label_count 形状
 //   3.5  cancel_operation 相当（CancelRegistry）の登録済み true / 未登録 false
 //   3.6  非 Windows で capabilities の windows_only == false（= cfg!(windows)）
@@ -20,10 +19,9 @@
 //   3.9  プレビュー MAX_PREVIEW_SIZE(2048) 超のみ内接縮小（以下は元寸法）
 //   3.10 PreviewData / ThumbnailData の width / height / png / placeholder 形状
 //
-// Validates: Requirements 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 3.10
+// Validates: Requirements 3.1, 3.2, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 3.10
 //
 // 既存 PBT（tests/pbt_*）のジェネレータ・パターンを流用する:
-//   - model_service 分割: pbt_model_onnx_filter.rs の variant / candidates 生成器
 //   - サムネイルクランプ: pbt_file_service_clamp.rs の size_strategy
 //   - バッチ分割・件数: pbt_inference_batches.rs の件数レンジ
 //
@@ -41,9 +39,8 @@ use tag_editor_core::commands::adapters::{
 use tag_editor_core::commands::cancel::CancelRegistry;
 use tag_editor_core::commands::progress::RecordingEmitter;
 use tag_editor_core::error::AppErrorKind;
-use tag_editor_core::models::{ChannelOrder, LabelDef, ModelFamily, ModelLocation, ModelVariant, TagCategory};
+use tag_editor_core::models::{ChannelOrder, LabelDef, RawTagFilter, TagCategory, TagFilter};
 use tag_editor_core::services::inference_service::SessionRunner;
-use tag_editor_core::services::model_service::list_models;
 use tag_editor_core::services::platform_service::{capabilities, convert_path, ConvertDirection};
 use tag_editor_core::services::{file_service, model_service};
 
@@ -59,6 +56,23 @@ impl SessionRunner for MockRunner {
     fn run(&self, _input: &[f32]) -> tag_editor_core::AppResult<Vec<f32>> {
         Ok(self.output.clone())
     }
+}
+
+/// Confidence_Threshold のみを設定した TagFilter を作るヘルパー。
+///
+/// 旧 `threshold: f32` フィールドと等価な採用挙動を得るため、他フィールドは
+/// 空、fraction_threshold は 0（非適用）にする。
+fn threshold_filter(threshold: f32) -> TagFilter {
+    let (filter, _invalid) =
+        tag_editor_core::logic::tag_filter::compile_filter(RawTagFilter {
+            keep: Vec::new(),
+            exclude: Vec::new(),
+            replace: Vec::new(),
+            additional: Vec::new(),
+            confidence_threshold: threshold,
+            fraction_threshold: 0.0,
+        });
+    filter
 }
 
 /// ラベル定義を組み立てる。
@@ -91,46 +105,6 @@ fn write_small_png(path: &Path) {
 }
 
 // ===========================================================================
-// 3.3 list_models: ローカル/リモート一覧と ONNX 区分（pbt_model_onnx_filter 流用）
-// ===========================================================================
-
-fn family_strategy() -> impl Strategy<Value = ModelFamily> {
-    prop_oneof![
-        Just(ModelFamily::Wd14),
-        Just(ModelFamily::MlDanbooru),
-        Just(ModelFamily::Local),
-    ]
-}
-
-fn location_strategy() -> impl Strategy<Value = ModelLocation> {
-    prop_oneof![
-        "[a-z0-9/_-]{1,20}".prop_map(ModelLocation::Remote),
-        "[a-z0-9/_.-]{1,20}".prop_map(ModelLocation::Local),
-    ]
-}
-
-fn variant_strategy() -> impl Strategy<Value = ModelVariant> {
-    (
-        "[a-z0-9_-]{1,16}",
-        "[A-Za-z0-9 _-]{1,20}",
-        family_strategy(),
-        location_strategy(),
-        any::<bool>(),
-    )
-        .prop_map(|(id, display_name, family, location, onnx_available)| ModelVariant {
-            id,
-            display_name,
-            family,
-            location,
-            onnx_available,
-        })
-}
-
-fn candidates_strategy() -> impl Strategy<Value = Vec<ModelVariant>> {
-    prop::collection::vec(variant_strategy(), 0..24)
-}
-
-// ===========================================================================
 // 3.8 サムネイルサイズ入力（pbt_file_service_clamp 流用）
 // ===========================================================================
 
@@ -149,28 +123,6 @@ fn size_strategy() -> impl Strategy<Value = u32> {
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(256))]
-
-    // -----------------------------------------------------------------------
-    // 3.3: list_models の available/excluded 区分が onnx_available で決まる
-    // （非該当入力 = モデル一覧化。修正は結線追加のみで一覧化ロジックは不変）
-    // -----------------------------------------------------------------------
-    #[test]
-    fn preserve_list_models_partition_by_onnx(candidates in candidates_strategy()) {
-        let listing = list_models(None, &candidates);
-
-        let expected_available: Vec<ModelVariant> =
-            candidates.iter().filter(|v| v.onnx_available).cloned().collect();
-        let expected_excluded: Vec<ModelVariant> =
-            candidates.iter().filter(|v| !v.onnx_available).cloned().collect();
-
-        prop_assert_eq!(&listing.available, &expected_available);
-        prop_assert_eq!(&listing.excluded, &expected_excluded);
-        // 分割は入力を過不足なく覆う。
-        prop_assert_eq!(
-            listing.available.len() + listing.excluded.len(),
-            candidates.len()
-        );
-    }
 
     // -----------------------------------------------------------------------
     // 3.8: サムネイルは 64〜512 にクランプし、アスペクト比を保って内接縮小し
@@ -234,7 +186,7 @@ proptest! {
         let op = format!("preserve-op-{n}-{batch}");
         let job = InferenceJob {
             image_paths: paths,
-            threshold: 0.5,
+            filter: threshold_filter(0.5),
             batch_size: Some(batch),
             labels: labels(&["a"]),
             input_size: 4,
@@ -504,7 +456,7 @@ fn preserve_spawn_inference_job_runs_and_clears_registry() {
 
     let job = InferenceJob {
         image_paths: vec![p.to_string_lossy().into_owned()],
-        threshold: 0.5,
+        filter: threshold_filter(0.5),
         batch_size: None,
         labels: labels(&["a"]),
         input_size: 4,
@@ -562,7 +514,7 @@ fn preserve_partial_failure_keeps_pre_operation_state_for_failed_items() {
 
     let job = InferenceJob {
         image_paths: paths,
-        threshold: 0.5,
+        filter: threshold_filter(0.5),
         batch_size: Some(2),
         labels: labels(&["a"]),
         input_size: 4,
@@ -627,7 +579,7 @@ fn preserve_cancel_reflected_across_threads_in_spawned_job() {
 
     let job = InferenceJob {
         image_paths: paths,
-        threshold: 0.5,
+        filter: threshold_filter(0.5),
         batch_size: Some(1),
         labels: labels(&["a"]),
         input_size: 4,
@@ -644,32 +596,6 @@ fn preserve_cancel_reflected_across_threads_in_spawned_job() {
     assert_eq!(result.succeeded + result.cancelled, n);
     assert!(result.cancelled >= 1, "キャンセルが反映されていない");
     assert!(registry.is_empty());
-}
-
-// -- 3.3: list_models のローカル検出（固定ケース） --------------------------
-
-#[test]
-fn preserve_list_models_detects_local_and_keeps_remote() {
-    let dir = tempfile::tempdir().unwrap();
-    let model = dir.path().join("local-a");
-    std::fs::create_dir(&model).unwrap();
-    std::fs::write(model.join("m.onnx"), b"onnx").unwrap();
-    std::fs::write(model.join("m.csv"), b"tag").unwrap();
-
-    let remote = ModelVariant {
-        id: "wd14-vit".to_string(),
-        display_name: "WD14 ViT".to_string(),
-        family: ModelFamily::Wd14,
-        location: ModelLocation::Remote("owner/wd14-vit".to_string()),
-        onnx_available: true,
-    };
-
-    let listing = list_models(Some(model.parent().unwrap()), std::slice::from_ref(&remote));
-    let mut ids: Vec<String> = listing.available.iter().map(|v| v.id.clone()).collect();
-    ids.sort();
-    assert_eq!(ids, vec!["local-a".to_string(), "wd14-vit".to_string()]);
-    assert!(listing.excluded.is_empty());
-    assert!(listing.available.iter().all(|v| v.onnx_available));
 }
 
 // -- 3.7: 破損画像は placeholder=true（サムネイル・プレビュー両面） -----------
@@ -716,19 +642,18 @@ fn preserve_broken_item_does_not_affect_sibling_valid_image() {
     assert_eq!(valid_thumb.height, 64);
 }
 
-// -- 3.4: load_local_model コマンドの失敗経路と DTO 形状（欠落時 Err(ModelLoad)） --
+// -- 3.4: load_variant の失敗経路と DTO 形状（欠落時 Err(ModelLoad)） --
 
 #[test]
-fn preserve_load_local_model_missing_pair_is_model_load_error() {
+fn preserve_load_variant_missing_pair_is_model_load_error() {
     // .onnx はあるがタグ定義が無い → ModelLoad。DTO は返らない（推論無効維持）。
     //
-    // `adapters::load_local_model` はタスク 3.2 で `State<ModelSessionState>` を
-    // 受け取る形へ拡張された（要件 2.4）。実 `tauri::State` はアプリ実行中でしか
-    // 構築できないため、コマンドが薄く委譲する先の `model_service::load_local_model`
-    // を直接検証し、エラー種別（保持 3.4 の失敗経路）を確認する。
+    // 実 `tauri::State` はアプリ実行中でしか構築できないため、コマンドが薄く委譲する
+    // 先の `model_service::load_variant` を直接検証し、エラー種別（保持 3.4 の
+    // 失敗経路）を確認する。
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("model.onnx"), b"onnx").unwrap();
 
-    let err = model_service::load_local_model(dir.path()).unwrap_err();
+    let err = model_service::load_variant(dir.path()).unwrap_err();
     assert_eq!(err.kind, AppErrorKind::ModelLoad);
 }

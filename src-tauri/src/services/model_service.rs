@@ -1,85 +1,77 @@
-//! ModelService（タスク 17.1）: モデル一覧と ONNX フィルタ。
+//! ModelService（タスク 3.1）: 静的カタログの構築と検証。
 //!
-//! 本モジュールは推論モデルの「一覧化」を担う。組み込みのリモート候補
-//! （WD14 系の各バリアント・ML-Danbooru 系）と、`Local_Model_Dir` 内で検出した
-//! ローカルモデルを統合し、ONNX 形式を持つ候補のみを利用可能な一覧として返す。
+//! 本モジュールは推論モデルの「選択肢」を静的な [`builtin_catalog`] として与える。
+//! 取得状態（Model_Present / Not_Present）はカタログ定義とは分離し、Model_Dir を
+//! 走査する動的判定（タスク 4.1）で別に求める。カタログは wd14-tagger 由来の
+//! WD14 系各バリアントと ML-Danbooru 系（1 リポジトリ複数 `.onnx`）を取り込む。
 //!
 //! 要件との対応:
 //!
-//! - 要件 15.1: 利用可能な Model_Variant（WD14 系・ML-Danbooru 系・ローカル検出）
-//!   の一覧を提示する。→ [`list_models`] が `available` に集約する。
-//! - 要件 15.5: TensorFlow 専用形式（`.onnx` を持たない DeepDanbooru プロジェクト
-//!   等）は選択対象に含めず、対象外である旨を提示する。→ `onnx_available == false`
-//!   の候補は `available` から除外し、`excluded` へ振り分けて UI が「対象外」表示
-//!   に使えるようにする。
+//! - 要件 1.3/1.5: 各 [`ModelVariant`] は識別子・表示名・Model_Family を非空で保持
+//!   し、WD14 系各バリアントと ML-Danbooru 系を含む。→ [`builtin_catalog`]。
+//! - 要件 1.6: 1 リポジトリ複数 `.onnx` は各 `.onnx` を個別 Variant とする。→
+//!   ML-Danbooru の各 `.onnx` を別 Variant として定義する。
+//! - 要件 1.4: 識別子・表示名・Model_Family のいずれか欠落/空の候補は登録せず除外
+//!   情報として保持する。→ [`validate_catalog`] が登録集合と除外集合へ分割する。
+//! - 要件 1.7/1.8: 全 Variant にわたり識別子は一意。→ [`validate_catalog`] が重複
+//!   識別子を一意化する。
 //!
-//! # 設計上の取り決め
+//! # 設計上の取り決め（純粋関数としての検証）
 //!
-//! - フィルタの基準は各候補の [`ModelVariant::onnx_available`] フラグ **のみ**。
-//!   これにより Property 24（一覧 == `onnx_available == true` の集合）が候補集合の
-//!   組み立て方に依らず成り立つ。
-//! - リモート候補は呼び出し側から `remote_candidates` として受け取る形にして
-//!   テスト可能性を確保する。既知の WD14／ML-Danbooru バリアントは
-//!   [`builtin_remote_variants`] が提供し、実運用ではこれを渡す想定。
-//! - ローカルモデルの検出は「`.onnx` ファイルとタグ定義ファイル（`.csv` または
-//!   `.json`）の対」を要件 15.2／用語定義（`Local_Model_Dir`）に従って判定する。
-//!   タグ定義を欠く `.onnx` 単体は不完全なため検出対象にしない。
+//! [`validate_catalog`] は候補列を受け取り、`(登録集合, 除外集合)` を返す純粋関数と
+//! する。これにより Property 1（必須フィールド非空）/ Property 2（登録・除外の分割）/
+//! Property 3（識別子一意）が候補の組み立て方に依らず成り立つ。[`builtin_catalog`]
+//! は静的候補を [`validate_catalog`] へ通した結果を返す。
 //!
-//! _Requirements: 15.1, 15.5_
+//! _Requirements: 1.3, 1.4, 1.5, 1.6, 1.7, 1.8_
 
+use std::collections::HashSet;
 use std::path::Path;
 
-use serde::{Deserialize, Serialize};
+use crate::models::{ModelFamily, ModelSource, ModelVariant, VariantPresence};
 
-use crate::models::{ModelFamily, ModelLocation, ModelVariant};
-
-/// モデル一覧の結果。
+/// 静的な Model_Catalog を返す（要件 1.3, 1.5, 1.6）。
 ///
-/// `available` は UI の選択肢として提示する候補（`onnx_available == true`）。
-/// `excluded` は TensorFlow 専用等で `.onnx` を持たない候補（要件 15.5 の
-/// 「対象外」提示に用いる）。両者の和が入力候補全体（重複排除後）に一致する。
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ModelListing {
-    /// 選択可能な Model_Variant（`onnx_available == true`）。
-    pub available: Vec<ModelVariant>,
-    /// 対象外の Model_Variant（`.onnx` を持たない、要件 15.5）。
-    pub excluded: Vec<ModelVariant>,
+/// wd14-tagger 由来の WD14 系各バリアント（`SmilingWolf/*` の v3 系ほか）と
+/// ML-Danbooru 系（`deepghs/ml-danbooru-onnx` 内の複数 `.onnx`）を定義し、
+/// [`validate_catalog`] を通した登録集合を返す。各 Variant は識別子・表示名・
+/// Model_Family を非空で保持し（Property 1）、識別子は全体で一意（Property 3）。
+///
+/// WD14 系は `source.onnx_file = "model.onnx"`・`tag_files = ["selected_tags.csv"]`。
+/// ML-Danbooru 系は 1 リポジトリ内の各 `.onnx` を個別 Variant とし、`onnx_file` を
+/// 各 `.onnx` パスに割り当てる（要件 1.6）。
+pub fn builtin_catalog() -> Vec<ModelVariant> {
+    let (registered, _excluded) = validate_catalog(builtin_candidates());
+    registered
 }
 
-/// 既知の WD14 系／ML-Danbooru 系リモートバリアントを返す。
+/// [`builtin_catalog`] の元になる静的候補列を組み立てる。
 ///
-/// いずれも ONNX 形式を提供するため `onnx_available = true`。実運用では本関数の
-/// 戻り値を [`list_models`] の `remote_candidates` に渡す。`location` は
-/// [`ModelLocation::Remote`]（HuggingFace リポジトリ）で表現する。
-///
-/// WD14 系は用語定義（Model_Variant）に挙がる ViT / ConvNeXT / ConvNeXTV2 /
-/// SwinV2 / MoaT の 5 バリアントに、ML-Danbooru 系 1 件を加えた計 6 件。
-pub fn builtin_remote_variants() -> Vec<ModelVariant> {
+/// この候補列を [`validate_catalog`] に通すことで、必須フィールド検証と識別子一意化
+/// を経た登録集合が得られる。テストからは本関数を直接呼んで検証前の候補を得られる。
+fn builtin_candidates() -> Vec<ModelVariant> {
+    // WD14 系: v3 系各バリアント。onnx は "model.onnx"、タグ定義は selected_tags.csv。
     let wd14 = [
+        ("wd14-vit-v3", "WD14 ViT v3", "SmilingWolf/wd-vit-tagger-v3"),
         (
-            "wd14-vit",
-            "WD14 ViT",
-            "SmilingWolf/wd-vit-tagger-v3",
-        ),
-        (
-            "wd14-convnext",
-            "WD14 ConvNeXT",
+            "wd14-convnext-v3",
+            "WD14 ConvNeXT v3",
             "SmilingWolf/wd-convnext-tagger-v3",
         ),
         (
-            "wd14-convnextv2",
-            "WD14 ConvNeXTV2",
-            "SmilingWolf/wd-v1-4-convnextv2-tagger-v2",
-        ),
-        (
-            "wd14-swinv2",
-            "WD14 SwinV2",
+            "wd14-swinv2-v3",
+            "WD14 SwinV2 v3",
             "SmilingWolf/wd-swinv2-tagger-v3",
         ),
         (
-            "wd14-moat",
-            "WD14 MoaT",
-            "SmilingWolf/wd-v1-4-moat-tagger-v2",
+            "wd14-vit-large-v3",
+            "WD14 ViT Large v3",
+            "SmilingWolf/wd-vit-large-tagger-v3",
+        ),
+        (
+            "wd14-eva02-large-v3",
+            "WD14 EVA02 Large v3",
+            "SmilingWolf/wd-eva02-large-tagger-v3",
         ),
     ];
 
@@ -89,82 +81,103 @@ pub fn builtin_remote_variants() -> Vec<ModelVariant> {
             id: id.to_string(),
             display_name: display.to_string(),
             family: ModelFamily::Wd14,
-            location: ModelLocation::Remote(repo.to_string()),
-            onnx_available: true,
+            source: ModelSource {
+                repo: repo.to_string(),
+                onnx_file: "model.onnx".to_string(),
+                tag_files: vec!["selected_tags.csv".to_string()],
+            },
         })
         .collect();
 
-    variants.push(ModelVariant {
-        id: "ml-danbooru".to_string(),
-        display_name: "ML-Danbooru".to_string(),
-        family: ModelFamily::MlDanbooru,
-        location: ModelLocation::Remote("deepghs/ml-danbooru-onnx".to_string()),
-        onnx_available: true,
-    });
+    // ML-Danbooru 系: 1 リポジトリ deepghs/ml-danbooru-onnx 内の複数 `.onnx` を
+    // それぞれ個別 Variant として登録する（要件 1.6）。`onnx_file` を各 `.onnx`
+    // パスに割り当て、`id` を区別する。
+    const ML_DANBOORU_REPO: &str = "deepghs/ml-danbooru-onnx";
+    let ml_danbooru = [
+        (
+            "ml-danbooru-caformer-dec-5-97527",
+            "ML-Danbooru CAFormer",
+            "ml_caformer_m36_dec-5-97527.onnx",
+        ),
+        (
+            "ml-danbooru-tresnet-d-6-30000",
+            "ML-Danbooru TResNet-D",
+            "TResnet-D-FLq_ema_6-30000.onnx",
+        ),
+    ];
+
+    variants.extend(ml_danbooru.into_iter().map(|(id, display, onnx)| {
+        ModelVariant {
+            id: id.to_string(),
+            display_name: display.to_string(),
+            family: ModelFamily::MlDanbooru,
+            source: ModelSource {
+                repo: ML_DANBOORU_REPO.to_string(),
+                onnx_file: onnx.to_string(),
+                tag_files: vec!["tags.csv".to_string(), "tags.json".to_string()],
+            },
+        }
+    }));
 
     variants
 }
 
-/// `Local_Model_Dir` を走査し、検出したローカルモデルを [`ModelVariant`] 化する。
+/// カタログ候補列を検証し、`(登録集合, 除外集合)` へ分割する純粋関数
+/// （要件 1.4, 1.6, 1.7, 1.8）。
 ///
-/// ローカルモデルは「`.onnx` ファイルと、タグ定義ファイル（`.csv` または
-/// `.json`）の対」で構成される（用語定義 `Local_Model_Dir`、要件 15.2）。本関数は
-/// 次の 2 通りのレイアウトを検出する:
+/// # 検証規則
 ///
-/// 1. `dir` 直下に `.onnx` と `.csv`/`.json` が同居するフラット構成。
-/// 2. `dir` 直下の各サブディレクトリ内に `.onnx` と `.csv`/`.json` が対で存在する
-///    構成（1 モデル 1 ディレクトリ）。
+/// 1. **必須フィールド非空**（要件 1.4）: 識別子（`id`）または表示名
+///    （`display_name`）が空文字（前後トリム後に空）の候補は登録せず除外集合へ回す。
+///    `family` は enum のため常に有効とみなす（design の注記）。
+/// 2. **識別子一意化**（要件 1.7, 1.8）: 登録集合内で識別子が重複する場合は、
+///    後続の候補にサフィックス（`-2`, `-3`, ...）を付与して一意化し、重複が 1 つも
+///    残らないようにする。付与後もなお衝突する場合はさらに連番を進める。
 ///
-/// `.onnx` はあるがタグ定義を欠くエントリは不完全とみなし、検出対象にしない
-/// （読み込めないモデルを一覧に載せないため）。検出した各モデルは
-/// `family = Local` / `location = Local(パス)` / `onnx_available = true` とする。
-/// `id` はディレクトリ名（フラット構成では `.onnx` のファイルステム）を用いる。
+/// # 戻り値
 ///
-/// 走査に失敗した場合（存在しない・権限不足等）は空ベクトルを返す（一覧化は
-/// リモート候補のみで継続できるため、ここではエラーにしない）。
-fn scan_local_models(dir: &Path) -> Vec<ModelVariant> {
-    let mut found = Vec::new();
+/// - 第 1 要素: 登録集合（識別子・表示名が非空で、識別子が一意化済み）。
+/// - 第 2 要素: 除外集合（必須フィールド欠落/空。除外理由の提示に用いる、要件 1.4）。
+///
+/// 登録集合と除外集合の和は入力候補全体に一致する（Property 2）。
+pub fn validate_catalog(
+    candidates: Vec<ModelVariant>,
+) -> (Vec<ModelVariant>, Vec<ModelVariant>) {
+    let mut registered: Vec<ModelVariant> = Vec::new();
+    let mut excluded: Vec<ModelVariant> = Vec::new();
+    let mut used_ids: HashSet<String> = HashSet::new();
 
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return found,
-    };
-
-    // まず dir 直下自体がフラット構成のモデルかを判定する。
-    if let Some(onnx) = onnx_with_tagdef(dir) {
-        let id = dir
-            .file_name()
-            .and_then(|s| s.to_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| onnx_stem(&onnx));
-        found.push(local_variant(id, &onnx));
-    }
-
-    // 次にサブディレクトリを 1 モデル 1 ディレクトリ構成として走査する。
-    let mut subdirs: Vec<std::path::PathBuf> = entries
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.is_dir())
-        .collect();
-    // 決定的な順序で返すためソートする。
-    subdirs.sort();
-
-    for sub in subdirs {
-        if let Some(onnx) = onnx_with_tagdef(&sub) {
-            let id = sub
-                .file_name()
-                .and_then(|s| s.to_str())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| onnx_stem(&onnx));
-            found.push(local_variant(id, &onnx));
+    for candidate in candidates {
+        // 1) 必須フィールド（id / display_name）の非空検証（要件 1.4）。
+        if candidate.id.trim().is_empty() || candidate.display_name.trim().is_empty() {
+            excluded.push(candidate);
+            continue;
         }
+
+        // 2) 識別子の一意化（要件 1.7, 1.8）。既に使われている識別子なら
+        //    サフィックスを付けて衝突しない識別子を割り当てる。
+        let mut variant = candidate;
+        if used_ids.contains(&variant.id) {
+            let base = variant.id.clone();
+            let mut suffix = 2usize;
+            let mut unique = format!("{base}-{suffix}");
+            while used_ids.contains(&unique) {
+                suffix += 1;
+                unique = format!("{base}-{suffix}");
+            }
+            variant.id = unique;
+        }
+        used_ids.insert(variant.id.clone());
+        registered.push(variant);
     }
 
-    found
+    (registered, excluded)
 }
 
 /// 指定ディレクトリ直下に `.onnx` とタグ定義（`.csv`/`.json`）が揃っていれば、
 /// その `.onnx` のパスを返す。揃っていなければ `None`。
+///
+/// [`load_variant`] の対検出に用いる（存在判定 `is_present` でも再利用する）。
 fn onnx_with_tagdef(dir: &Path) -> Option<std::path::PathBuf> {
     let read = std::fs::read_dir(dir).ok()?;
     let mut onnx: Option<std::path::PathBuf> = None;
@@ -196,224 +209,131 @@ fn onnx_with_tagdef(dir: &Path) -> Option<std::path::PathBuf> {
     }
 }
 
-/// `.onnx` パスからファイルステム（拡張子なしの名前）を取り出す。
-fn onnx_stem(onnx: &Path) -> String {
-    onnx.file_stem()
-        .and_then(|s| s.to_str())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| "local-model".to_string())
-}
-
-/// ローカル検出モデルの [`ModelVariant`] を組み立てる。
-fn local_variant(id: String, onnx: &Path) -> ModelVariant {
-    ModelVariant {
-        display_name: id.clone(),
-        id,
-        family: ModelFamily::Local,
-        location: ModelLocation::Local(onnx.to_string_lossy().into_owned()),
-        onnx_available: true,
-    }
-}
-
-/// リモート候補とローカル検出モデルを統合し、ONNX フィルタを適用して一覧化する。
-///
-/// 手順:
-///
-/// 1. `remote_candidates`（実運用では [`builtin_remote_variants`] の戻り値）と、
-///    `local_model_dir` が `Some` の場合は [`scan_local_models`] の検出結果を
-///    連結して全候補集合を作る。
-/// 2. 各候補を [`ModelVariant::onnx_available`] で振り分ける。`true` は
-///    `available`、`false` は `excluded`（要件 15.5 の「対象外」提示用）。
-///
-/// これにより `available` は「`onnx_available == true` の候補集合」とちょうど
-/// 一致する（Property 24）。ローカル検出モデルは常に `onnx_available = true` の
-/// ため必ず `available` に入る。
-///
-/// # 引数
-///
-/// - `local_model_dir`: ローカルモデル配置ディレクトリ。`None` ならローカル走査を
-///   行わずリモート候補のみで一覧化する。
-/// - `remote_candidates`: リモートの候補集合。TF 専用（`onnx_available == false`）を
-///   含めてよい。含めた場合は `excluded` へ振り分けられる。
-pub fn list_models(
-    local_model_dir: Option<&Path>,
-    remote_candidates: &[ModelVariant],
-) -> ModelListing {
-    let mut all: Vec<ModelVariant> = remote_candidates.to_vec();
-
-    if let Some(dir) = local_model_dir {
-        all.extend(scan_local_models(dir));
-    }
-
-    let mut listing = ModelListing::default();
-    for variant in all {
-        if variant.onnx_available {
-            listing.available.push(variant);
-        } else {
-            listing.excluded.push(variant);
-        }
-    }
-    listing
-}
-
 #[cfg(test)]
-mod tests {
+mod catalog_tests {
     use super::*;
-    use std::fs;
-    use tempfile::tempdir;
 
-    /// テスト用のリモート候補を組み立てる。
-    fn remote(id: &str, onnx_available: bool) -> ModelVariant {
+    /// テスト用の候補を組み立てる。
+    fn candidate(
+        id: &str,
+        display: &str,
+        family: ModelFamily,
+        repo: &str,
+        onnx: &str,
+    ) -> ModelVariant {
         ModelVariant {
             id: id.to_string(),
-            display_name: id.to_string(),
-            family: ModelFamily::Wd14,
-            location: ModelLocation::Remote(format!("repo/{id}")),
-            onnx_available,
+            display_name: display.to_string(),
+            family,
+            source: ModelSource {
+                repo: repo.to_string(),
+                onnx_file: onnx.to_string(),
+                tag_files: vec!["selected_tags.csv".to_string()],
+            },
         }
     }
 
     #[test]
-    fn builtin_variants_cover_wd14_and_ml_danbooru_all_onnx() {
-        let variants = builtin_remote_variants();
-        // WD14 5 バリアント + ML-Danbooru 1 = 6 件。
-        assert_eq!(variants.len(), 6);
-        // 全て ONNX 形式を持つ。
-        assert!(variants.iter().all(|v| v.onnx_available));
+    fn builtin_catalog_covers_wd14_variants_and_ml_danbooru_multiple_onnx() {
+        let catalog = builtin_catalog();
 
-        let wd14 = variants
+        // WD14 系が複数バリアント含まれる（要件 1.5）。
+        let wd14: Vec<&ModelVariant> = catalog
             .iter()
             .filter(|v| v.family == ModelFamily::Wd14)
-            .count();
-        let mld = variants
+            .collect();
+        assert!(wd14.len() >= 2, "WD14 系は複数バリアントを含むべき");
+        // WD14 系は model.onnx / selected_tags.csv を持つ。
+        assert!(wd14.iter().all(|v| v.source.onnx_file == "model.onnx"
+            && v
+                .source
+                .tag_files
+                .contains(&"selected_tags.csv".to_string())));
+
+        // ML-Danbooru 系は 1 リポジトリ内の複数 .onnx を個別 Variant として含む（要件 1.6）。
+        let mld: Vec<&ModelVariant> = catalog
             .iter()
             .filter(|v| v.family == ModelFamily::MlDanbooru)
-            .count();
-        assert_eq!(wd14, 5);
-        assert_eq!(mld, 1);
+            .collect();
+        assert!(
+            mld.len() >= 2,
+            "ML-Danbooru は複数 .onnx を個別 Variant にすべき"
+        );
+        // 同一リポジトリで onnx_file が相異なる。
+        let repos: HashSet<&str> = mld.iter().map(|v| v.source.repo.as_str()).collect();
+        assert_eq!(repos.len(), 1, "ML-Danbooru は単一リポジトリのはず");
+        let onnx_files: HashSet<&str> =
+            mld.iter().map(|v| v.source.onnx_file.as_str()).collect();
+        assert_eq!(onnx_files.len(), mld.len(), "各 .onnx は相異なるべき");
     }
 
     #[test]
-    fn tf_only_candidate_is_excluded_from_available() {
+    fn builtin_catalog_fields_are_non_empty_and_ids_unique() {
+        let catalog = builtin_catalog();
+        // 必須フィールド非空（Property 1）。
+        assert!(catalog
+            .iter()
+            .all(|v| !v.id.trim().is_empty() && !v.display_name.trim().is_empty()));
+        // 識別子一意（Property 3）。
+        let ids: HashSet<&str> = catalog.iter().map(|v| v.id.as_str()).collect();
+        assert_eq!(ids.len(), catalog.len(), "識別子は一意であるべき");
+    }
+
+    #[test]
+    fn validate_catalog_excludes_empty_id_or_display_name() {
         let candidates = vec![
-            remote("wd14-vit", true),
-            remote("deepdanbooru", false), // TF 専用（.onnx なし）
+            candidate("ok", "OK", ModelFamily::Wd14, "repo/ok", "model.onnx"),
+            candidate("", "空 id", ModelFamily::Wd14, "repo/x", "model.onnx"),
+            candidate("empty-name", "  ", ModelFamily::Wd14, "repo/y", "model.onnx"),
         ];
-        let listing = list_models(None, &candidates);
+        let total = candidates.len();
+        let (registered, excluded) = validate_catalog(candidates);
 
-        let available_ids: Vec<&str> =
-            listing.available.iter().map(|v| v.id.as_str()).collect();
-        let excluded_ids: Vec<&str> =
-            listing.excluded.iter().map(|v| v.id.as_str()).collect();
-
-        assert_eq!(available_ids, vec!["wd14-vit"]);
-        assert_eq!(excluded_ids, vec!["deepdanbooru"]);
-        // available は onnx_available==true の集合とちょうど一致（Property 24 の骨子）。
-        assert!(listing.available.iter().all(|v| v.onnx_available));
+        // 登録は必須フィールド非空のみ（要件 1.4）。
+        assert_eq!(registered.len(), 1);
+        assert_eq!(registered[0].id, "ok");
+        // 除外は 2 件（空 id・空 display_name）。
+        assert_eq!(excluded.len(), 2);
+        // 登録 ∪ 除外 = 入力全体（Property 2）。
+        assert_eq!(registered.len() + excluded.len(), total);
     }
 
     #[test]
-    fn local_dir_with_onnx_and_csv_is_detected() {
-        let dir = tempdir().unwrap();
-        let model = dir.path().join("my-model");
-        fs::create_dir(&model).unwrap();
-        fs::write(model.join("model.onnx"), b"onnx").unwrap();
-        fs::write(model.join("selected_tags.csv"), b"tag,category").unwrap();
-
-        let listing = list_models(Some(dir.path()), &[]);
-
-        assert_eq!(listing.available.len(), 1);
-        let v = &listing.available[0];
-        assert_eq!(v.id, "my-model");
-        assert_eq!(v.family, ModelFamily::Local);
-        assert!(v.onnx_available);
-        match &v.location {
-            ModelLocation::Local(p) => assert!(p.ends_with("model.onnx")),
-            other => panic!("ローカルモデルは Local パスを持つべき: {other:?}"),
-        }
-        assert!(listing.excluded.is_empty());
-    }
-
-    #[test]
-    fn local_dir_with_onnx_and_json_is_detected() {
-        let dir = tempdir().unwrap();
-        let model = dir.path().join("json-model");
-        fs::create_dir(&model).unwrap();
-        fs::write(model.join("model.onnx"), b"onnx").unwrap();
-        fs::write(model.join("tags.json"), b"[]").unwrap();
-
-        let listing = list_models(Some(dir.path()), &[]);
-        assert_eq!(listing.available.len(), 1);
-        assert_eq!(listing.available[0].id, "json-model");
-    }
-
-    #[test]
-    fn onnx_without_tagdef_is_not_detected() {
-        let dir = tempdir().unwrap();
-        let model = dir.path().join("incomplete");
-        fs::create_dir(&model).unwrap();
-        // タグ定義ファイルが無い .onnx 単体は検出しない。
-        fs::write(model.join("model.onnx"), b"onnx").unwrap();
-
-        let listing = list_models(Some(dir.path()), &[]);
-        assert!(listing.available.is_empty());
-        assert!(listing.excluded.is_empty());
-    }
-
-    #[test]
-    fn flat_local_dir_layout_is_detected() {
-        // dir 直下に .onnx と .csv が同居するフラット構成。
-        let dir = tempdir().unwrap();
-        fs::write(dir.path().join("wd.onnx"), b"onnx").unwrap();
-        fs::write(dir.path().join("wd.csv"), b"tag,category").unwrap();
-
-        let listing = list_models(Some(dir.path()), &[]);
-        assert_eq!(listing.available.len(), 1);
-        assert_eq!(listing.available[0].family, ModelFamily::Local);
-    }
-
-    #[test]
-    fn mixes_remote_and_local_and_applies_filter() {
-        let dir = tempdir().unwrap();
-        let model = dir.path().join("local-a");
-        fs::create_dir(&model).unwrap();
-        fs::write(model.join("m.onnx"), b"onnx").unwrap();
-        fs::write(model.join("m.csv"), b"tag").unwrap();
-
+    fn validate_catalog_deduplicates_conflicting_ids() {
         let candidates = vec![
-            remote("wd14-vit", true),
-            remote("tf-only", false),
+            candidate("dup", "A", ModelFamily::Wd14, "repo/a", "a.onnx"),
+            candidate("dup", "B", ModelFamily::Wd14, "repo/a", "b.onnx"),
+            candidate("dup", "C", ModelFamily::MlDanbooru, "repo/a", "c.onnx"),
         ];
-        let listing = list_models(Some(dir.path()), &candidates);
+        let (registered, excluded) = validate_catalog(candidates);
 
-        // available = リモートの ONNX 1 件 + ローカル 1 件。
-        let mut available_ids: Vec<String> =
-            listing.available.iter().map(|v| v.id.clone()).collect();
-        available_ids.sort();
-        assert_eq!(available_ids, vec!["local-a", "wd14-vit"]);
-
-        // excluded = TF 専用 1 件。
-        assert_eq!(listing.excluded.len(), 1);
-        assert_eq!(listing.excluded[0].id, "tf-only");
-
-        // Property 24 の骨子: available はちょうど onnx_available==true の集合。
-        assert!(listing.available.iter().all(|v| v.onnx_available));
-        assert!(listing.excluded.iter().all(|v| !v.onnx_available));
+        // すべて登録され（必須フィールドは非空）、識別子は一意化される（要件 1.7, 1.8）。
+        assert_eq!(registered.len(), 3);
+        assert!(excluded.is_empty());
+        let ids: HashSet<&str> = registered.iter().map(|v| v.id.as_str()).collect();
+        assert_eq!(ids.len(), 3, "一意化後に重複が残ってはならない");
+        // 先頭は元の id を保持し、後続はサフィックスで区別される。
+        assert_eq!(registered[0].id, "dup");
+        assert!(registered[1].id.starts_with("dup-"));
+        assert!(registered[2].id.starts_with("dup-"));
     }
 
     #[test]
-    fn missing_local_dir_yields_no_local_models() {
-        let dir = tempdir().unwrap();
-        let missing = dir.path().join("does-not-exist");
-        let listing = list_models(Some(&missing), &[remote("wd14-vit", true)]);
-        // 走査失敗はエラーにせず、リモート候補のみで一覧化する。
-        assert_eq!(listing.available.len(), 1);
-        assert_eq!(listing.available[0].id, "wd14-vit");
+    fn validate_catalog_partition_union_equals_input() {
+        // 空フィールド候補と正常候補を混在させ、登録 ∪ 除外 = 入力（Property 2）。
+        let candidates = vec![
+            candidate("a", "A", ModelFamily::Wd14, "r/a", "a.onnx"),
+            candidate("", "", ModelFamily::Wd14, "r/b", "b.onnx"),
+            candidate("a", "A dup", ModelFamily::Wd14, "r/a", "a2.onnx"),
+        ];
+        let total = candidates.len();
+        let (registered, excluded) = validate_catalog(candidates);
+        assert_eq!(registered.len() + excluded.len(), total);
     }
 }
 
 // ---------------------------------------------------------------------------
-// タスク 17.3: ローカルモデル読込
+// タスク 10.1: Variant 読込（load_variant）
 // ---------------------------------------------------------------------------
 //
 // 本節は「`.onnx` とタグ定義（`.csv`/`.json`）の対」を実際に読み込み、推論に使う
@@ -421,13 +341,13 @@ mod tests {
 //
 // 要件との対応:
 //
-// - 要件 15.2: ローカルの `.onnx` とタグ定義の対を読み込んでモデルを利用可能に
-//   する。→ [`load_local_model`] が `.onnx` の検出・タグ定義の解析・ONNX セッション
-//   構築を行い [`LoadedModel`] を返す。
-// - 要件 15.6: ONNX の読込に失敗、またはタグ定義が欠落している場合はエラーとし、
-//   推論を無効のまま維持する（部分的に壊れたモデルを「読み込めた」ことにしない）。
-//   → 検出・解析・セッション構築のいずれかが失敗すると `Err(ModelLoad)` を返し、
-//   呼び出し側は `LoadedModel` を得られない = 推論は無効のまま。
+// - 要件 8.1: `variant_dir` 配下の `.onnx` と対応タグ定義を読み込んでモデルを
+//   利用可能にする。→ [`load_variant`] が `.onnx` の検出・タグ定義の解析・ONNX
+//   セッション構築を行い [`LoadedModel`] を返す。
+// - 要件 8.2, 8.3, 8.4: ONNX 読込不可・タグ定義解析不可・書込失敗は原因を識別できる
+//   エラーとし、推論を開始せず既存状態を保持する（部分的に壊れたモデルを「読み込めた」
+//   ことにしない）。→ 検出・解析・セッション構築のいずれかが失敗すると
+//   `Err(ModelLoad)` を返し、呼び出し側は `LoadedModel` を得られない = 推論は無効のまま。
 //
 // # 設計上の取り決め（テスト可能性のための分割）
 //
@@ -436,10 +356,10 @@ mod tests {
 //
 // 1. タグ定義の解析・検証と `.onnx` パスの特定 …… ランタイム非依存で完全にテスト可能。
 //    - [`parse_tag_definition`]: `.csv`/`.json` を [`LabelDef`] 列へ解析する。
-//    - [`onnx_with_tagdef`]（既存, タスク 17.1）: 対の検出に再利用する。
-// 2. ONNX セッションの構築 …… 実ランタイムを要する（[`load_local_model`] の後段）。
+//    - [`onnx_with_tagdef`]: 対の検出に再利用する。
+// 2. ONNX セッションの構築 …… 実ランタイムを要する（[`load_variant`] の後段）。
 //
-// これにより「タグ定義欠落」「タグ定義不正」「`.onnx` 欠落」といった 15.6 の異常系は
+// これにより「タグ定義欠落」「タグ定義不正」「`.onnx` 欠落」といった要件 8.2/8.3 の異常系は
 // ランタイム無しでも検証できる。実セッション構築を伴う正常系のテストはランタイムが
 // 無い環境ではスキップする。
 //
@@ -462,7 +382,7 @@ const DEFAULT_CHANNEL_ORDER: ChannelOrder = ChannelOrder::Bgr;
 
 /// タグ定義ファイル（`.csv` / `.json`）を [`LabelDef`] 列へ解析する。
 ///
-/// ランタイム非依存の純粋な解析で、[`load_local_model`] のテスト可能な中核。
+/// ランタイム非依存の純粋な解析で、[`load_variant`] のテスト可能な中核。
 ///
 /// # 対応フォーマット
 ///
@@ -649,13 +569,13 @@ fn parse_tag_definition_json(content: &str) -> Result<Vec<LabelDef>, String> {
     Ok(labels)
 }
 
-/// ローカルモデルディレクトリから [`LoadedModel`] を構築する（要件 15.2）。
+/// Variant ディレクトリから [`LoadedModel`] を構築する（要件 8.1）。
 ///
-/// `dir` 直下に `.onnx` とタグ定義（`.csv`/`.json`）が対で存在することを
-/// [`onnx_with_tagdef`]（タスク 17.1 の検出ロジック）で確認し、タグ定義を
+/// `variant_dir` 直下に `.onnx` とタグ定義（`.csv`/`.json`）が対で存在することを
+/// [`onnx_with_tagdef`]（対検出ロジック）で確認し、タグ定義を
 /// [`parse_tag_definition`] で解析したうえで ONNX セッションを構築する。
 ///
-/// # エラー（要件 15.6: いずれも推論を無効のまま維持）
+/// # エラー（要件 8.2, 8.3, 8.4: いずれも推論を開始せず既存状態を保持）
 ///
 /// - `.onnx` またはタグ定義が欠落 → `Err(ModelLoad)`。
 /// - タグ定義が空/不正 → `Err(ModelLoad)`（[`parse_tag_definition`] 由来）。
@@ -665,19 +585,19 @@ fn parse_tag_definition_json(content: &str) -> Result<Vec<LabelDef>, String> {
 ///
 /// `input_size`/`channel_order` は WD14 既定（448 / BGR）を用いる。モデルメタから
 /// 解決可能になった場合は後続タスクで精緻化する。
-pub fn load_local_model(dir: &Path) -> AppResult<LoadedModel> {
-    // 1) `.onnx` とタグ定義の対を検出する（対が無ければ 15.6 のエラー）。
-    let onnx_path = onnx_with_tagdef(dir).ok_or_else(|| {
+pub fn load_variant(variant_dir: &Path) -> AppResult<LoadedModel> {
+    // 1) `.onnx` とタグ定義の対を検出する（対が無ければ要件 8.2 のエラー）。
+    let onnx_path = onnx_with_tagdef(variant_dir).ok_or_else(|| {
         AppError::model_load(
             "モデルディレクトリに .onnx とタグ定義（.csv/.json）の対がありません",
         )
-        .with_path(dir.to_string_lossy().into_owned())
+        .with_path(variant_dir.to_string_lossy().into_owned())
     })?;
 
-    // 2) タグ定義ファイルを特定して解析する（欠落/不正は 15.6 のエラー）。
-    let tagdef_path = find_tag_definition(dir).ok_or_else(|| {
+    // 2) タグ定義ファイルを特定して解析する（欠落/不正は要件 8.3 のエラー）。
+    let tagdef_path = find_tag_definition(variant_dir).ok_or_else(|| {
         AppError::model_load("タグ定義ファイル（.csv/.json）が見つかりません")
-            .with_path(dir.to_string_lossy().into_owned())
+            .with_path(variant_dir.to_string_lossy().into_owned())
     })?;
     let labels = parse_tag_definition(&tagdef_path)?;
 
@@ -734,7 +654,7 @@ fn build_session(onnx_path: &Path) -> AppResult<ort::session::Session> {
 }
 
 #[cfg(test)]
-mod load_local_model_tests {
+mod load_variant_tests {
     use super::*;
     use std::fs;
     use tempfile::tempdir;
@@ -846,29 +766,29 @@ mod load_local_model_tests {
 
     #[test]
     fn missing_tag_definition_yields_model_load_error() {
-        // .onnx はあるがタグ定義が無い → 15.6 のエラー（推論無効のまま維持）。
+        // .onnx はあるがタグ定義が無い → 要件 8.3 のエラー（推論を開始せず既存状態を保持）。
         let dir = tempdir().unwrap();
         fs::write(dir.path().join("model.onnx"), b"onnx").unwrap();
 
-        let err = load_local_model(dir.path()).unwrap_err();
+        let err = load_variant(dir.path()).unwrap_err();
         assert_eq!(err.kind, crate::error::AppErrorKind::ModelLoad);
     }
 
     #[test]
     fn missing_onnx_yields_model_load_error() {
-        // タグ定義はあるが .onnx が無い → 15.6 のエラー。
+        // タグ定義はあるが .onnx が無い → 要件 8.2 のエラー。
         let dir = tempdir().unwrap();
         fs::write(dir.path().join("selected_tags.csv"), b"tag_id,name,category\n1,solo,0\n")
             .unwrap();
 
-        let err = load_local_model(dir.path()).unwrap_err();
+        let err = load_variant(dir.path()).unwrap_err();
         assert_eq!(err.kind, crate::error::AppErrorKind::ModelLoad);
     }
 
     #[test]
     fn empty_dir_yields_model_load_error() {
         let dir = tempdir().unwrap();
-        let err = load_local_model(dir.path()).unwrap_err();
+        let err = load_variant(dir.path()).unwrap_err();
         assert_eq!(err.kind, crate::error::AppErrorKind::ModelLoad);
     }
 
@@ -886,39 +806,32 @@ mod load_local_model_tests {
         )
         .unwrap();
 
-        let result = load_local_model(dir.path());
-        // タグ定義は妥当なので、失敗するとすればセッション構築段階（15.6）。
+        let result = load_variant(dir.path());
+        // タグ定義は妥当なので、失敗するとすればセッション構築段階（要件 8.4）。
         let err = result.expect_err("不正な .onnx はモデル読込エラーになるべき");
         assert_eq!(err.kind, crate::error::AppErrorKind::ModelLoad);
     }
 }
 
 // ---------------------------------------------------------------------------
-// タスク 17.4: リモートモデルのダウンロード・保存
+// タスク 9.1: Variant の取得・保存（download_variant）
 // ---------------------------------------------------------------------------
 //
-// 本節はリモートの [`ModelVariant`]（`ModelLocation::Remote(repo)`）から
-// `model.onnx` とタグ定義ファイルを取得し、`dest_dir` へローカル保存する。保存後は
-// タスク 17.3 の [`load_local_model`] が `dest_dir` を読み込めるようになるため、
-// 次回以降はローカルから読み込める（要件 15.3/15.4）。
+// 本節は [`ModelVariant`] の `source`（[`ModelSource`]: repo + onnx_file + tag_files）
+// から `.onnx` とタグ定義ファイルを取得し、`variant_dir` へ原子的にローカル保存する。
+// 保存後は [`load_variant`] が `variant_dir` を読み込めるように
+// なるため、次回以降はローカルから読み込める（要件 5.5）。
 //
 // 要件との対応:
 //
-// - 要件 15.3: リモート Model_Variant の `model.onnx` とタグ定義ファイルを
-//   Model_Store からローカルへダウンロードする。→ [`download_model`] が両ファイルを
-//   [`ModelDownloader`] 経由で取得する。
-// - 要件 15.4: ダウンロードしたモデルをローカルに保存し次回以降ローカルから読み込み
-//   可能にする。→ 取得バイト列を `dest_dir/model.onnx` と `dest_dir/<tagdef>` へ
-//   保存し、`dest_dir` を返す。返した `dest_dir` は [`load_local_model`] が読める
-//   （`.onnx` とタグ定義の対が揃う）。
-// - 要件 15.7: ダウンロードが 30 秒以内に完了しない場合は最大 3 回まで再試行し、
-//   それでも失敗する場合はエラー。→ 各ファイル取得を [`DOWNLOAD_TIMEOUT`]（30 秒）
-//   のタイムアウト付きで [`MAX_DOWNLOAD_ATTEMPTS`]（3 回）まで再試行し、最終失敗で
-//   `Err(Download)`。
-// - 要件 15.8: ローカル保存に失敗した場合はエラーとし推論機能を無効のまま維持する。
-//   → 保存（I/O）失敗時は `Err`（`Io`/`AccessDenied` 等）を返し、書きかけの部分
-//   ファイルを削除して「読み込めてしまう半端なモデル」を残さない（[`load_local_model`]
-//   が後から成功してしまうことを防ぐ）。
+// - 要件 6.1/6.2: 各ファイル取得を [`DOWNLOAD_TIMEOUT`]（30 秒）のタイムアウト付きで
+//   [`MAX_DOWNLOAD_ATTEMPTS`]（3 回）まで再試行し、最終失敗で `Err(Download)`。
+// - 要件 6.3: 失敗時は失敗ファイル名を含むエラーを返す（[`download_error`]）。
+// - 要件 6.4: 全取得成功後に原子的確定（一時ファイル → リネーム、[`atomic_write`]）。
+// - 要件 2.6/5.4/5.6/6.5/6.6: 新規（開始時 Not_Present）の失敗・キャンセルは部分
+//   ファイルを除去し Not_Present へ戻す。
+// - 要件 5.8: 上書き（開始時 Present）の失敗時は既存 Assets を保持する
+//   （[`save_overwrite`] が退避 → 配置 → 失敗時ロールバック）。
 //
 // # 設計上の取り決め（テスト可能性のためのトランスポート分離）
 //
@@ -931,13 +844,13 @@ mod load_local_model_tests {
 // - [`ModelDownloader::fetch`]: リポジトリとファイル名・タイムアウトを受け取り、
 //   ファイルのバイト列を返す。失敗は [`DownloadError`] で表す（タイムアウトか否かを
 //   区別できる）。
-// - [`download_model`]: `ModelDownloader` に対して総称で実装し、取得→保存→クリーン
-//   アップの制御フロー（再試行・原子的保存・部分ファイル除去）を担う。この制御フロー
-//   はモックで完全にテストできる。
+// - [`download_variant`]: `ModelDownloader` に対して総称で実装し、取得→保存→クリーン
+//   アップの制御フロー（再試行・原子的保存・部分ファイル除去・上書きロールバック）を
+//   担う。この制御フローはモックで完全にテストできる。
 // - [`HfHubDownloader`]: `hf-hub` を用いた実トランスポート。薄いラッパであり、実
 //   ダウンロードの検証は統合テストに委ねる（単体テストしない）。
 //
-// _Requirements: 15.3, 15.4, 15.7, 15.8_
+// _Requirements: 2.6, 5.4, 5.5, 5.6, 5.8, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6_
 
 use std::time::Duration;
 
@@ -950,13 +863,10 @@ const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30);
 /// （制御フローとしては最大 3 回 `fetch` を呼ぶ）。
 const MAX_DOWNLOAD_ATTEMPTS: usize = 3;
 
-/// ローカル保存する ONNX ファイル名。[`load_local_model`] が `.onnx` として検出する。
-const SAVED_ONNX_NAME: &str = "model.onnx";
-
 /// ダウンロードトランスポートのエラー。
 ///
 /// タイムアウトとその他の失敗を区別する（要件 15.7 のタイムアウト再試行の判断に
-/// 用いるが、[`download_model`] はどちらの失敗でも再試行する）。
+/// 用いるが、`download_variant` はどちらの失敗でも再試行する）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DownloadError {
     /// タイムアウト（既定 30 秒以内に完了しなかった）。
@@ -989,123 +899,11 @@ pub trait ModelDownloader {
     ) -> Result<Vec<u8>, DownloadError>;
 }
 
-/// バリアントの系統に応じたタグ定義ファイル名の候補を返す。
-///
-/// WD14 系は `selected_tags.csv`。ML-Danbooru 系は ONNX リポジトリの慣例に合わせ
-/// `tags.csv` を試し、無ければ `.json` 系にフォールバックする。取得は先頭候補から
-/// 順に試み、最初に成功したものを採用する。保存時の拡張子は採用した候補に合わせる
-/// ため、[`load_local_model`] が `.csv`/`.json` として検出できる。
-fn tag_definition_candidates(variant: &ModelVariant) -> &'static [&'static str] {
-    match variant.family {
-        ModelFamily::Wd14 => &["selected_tags.csv"],
-        ModelFamily::MlDanbooru => &["tags.csv", "tags.json", "selected_tags.csv"],
-        // ローカル検出モデルはダウンロード対象ではないが、防御的に候補を用意する。
-        ModelFamily::Local => &["selected_tags.csv", "tags.csv", "tags.json"],
-    }
-}
-
-/// リモート [`ModelVariant`] から `model.onnx` とタグ定義を取得し `dest_dir` へ保存する。
-///
-/// 成功時は `dest_dir` を返す。返したディレクトリには `.onnx` とタグ定義の対が
-/// 揃っており、[`load_local_model`] で読み込める（要件 15.4）。
-///
-/// # 制御フロー
-///
-/// 1. `variant.location` が [`ModelLocation::Remote`] であることを確認する
-///    （ローカルは対象外 → `Err(InvalidInput)`）。
-/// 2. `dest_dir` を作成する（既存でも可）。
-/// 3. `model.onnx` を [`fetch_with_retry`] で取得する（30 秒 × 最大 3 回）。
-/// 4. タグ定義を候補名の順に取得する。いずれか 1 つが取得できればよい。
-/// 5. 取得した両バイト列を原子的に（一時ファイル → リネーム）保存する。
-/// 6. いずれかの段階で失敗したら、書きかけの成果物を削除してから `Err` を返す
-///    （半端なモデルを残さない = 推論無効維持、要件 15.8）。
-///
-/// # エラー
-///
-/// - ローカルバリアント → `Err(InvalidInput)`。
-/// - `model.onnx`/タグ定義のダウンロード最終失敗 → `Err(Download)`（要件 15.7）。
-/// - 保存（ディレクトリ作成・書込・リネーム）失敗 → `Err(Io/AccessDenied)` かつ
-///   部分ファイルを除去（要件 15.8）。
-pub fn download_model<D: ModelDownloader>(
-    downloader: &D,
-    variant: &ModelVariant,
-    dest_dir: &Path,
-) -> AppResult<std::path::PathBuf> {
-    let repo = match &variant.location {
-        ModelLocation::Remote(repo) => repo.as_str(),
-        ModelLocation::Local(_) => {
-            return Err(AppError::invalid_input(
-                "ローカルモデルはダウンロード対象ではありません",
-            ));
-        }
-    };
-
-    // dest_dir を用意する。作成失敗（親が無い・権限不足など）は 15.8 の保存失敗。
-    if let Err(e) = std::fs::create_dir_all(dest_dir) {
-        return Err(AppError::from(e)
-            .with_path(dest_dir.to_string_lossy().into_owned()));
-    }
-
-    // 1) model.onnx を取得する（再試行付き）。
-    let onnx_bytes = fetch_with_retry(downloader, repo, SAVED_ONNX_NAME)
-        .map_err(|e| download_error(repo, SAVED_ONNX_NAME, &e))?;
-
-    // 2) タグ定義を候補順に取得する。最初に成功した候補名で保存する。
-    let candidates = tag_definition_candidates(variant);
-    let mut tagdef: Option<(&'static str, Vec<u8>)> = None;
-    let mut last_err: Option<DownloadError> = None;
-    for &name in candidates {
-        match fetch_with_retry(downloader, repo, name) {
-            Ok(bytes) => {
-                tagdef = Some((name, bytes));
-                break;
-            }
-            Err(e) => last_err = Some(e),
-        }
-    }
-    let (tagdef_name, tagdef_bytes) = match tagdef {
-        Some(v) => v,
-        None => {
-            let e = last_err.unwrap_or(DownloadError::Other(
-                "タグ定義の候補がありません".to_string(),
-            ));
-            return Err(download_error(
-                repo,
-                candidates.first().copied().unwrap_or("tag-definition"),
-                &e,
-            ));
-        }
-    };
-
-    // 3) 取得済みバイト列を原子的に保存する。保存失敗時は書きかけを全て除去し、
-    //    読み込める半端なモデルを残さない（要件 15.8）。
-    let onnx_dest = dest_dir.join(SAVED_ONNX_NAME);
-    let tagdef_dest = dest_dir.join(tagdef_name);
-
-    let save_result = (|| -> AppResult<()> {
-        atomic_write(&onnx_dest, &onnx_bytes)?;
-        atomic_write(&tagdef_dest, &tagdef_bytes)?;
-        Ok(())
-    })();
-
-    if let Err(e) = save_result {
-        // 部分書込のクリーンアップ（best effort）。片方だけ残ると
-        // load_local_model が「対あり」と誤検出しうるため両方除去する。
-        let _ = std::fs::remove_file(&onnx_dest);
-        let _ = std::fs::remove_file(&tagdef_dest);
-        return Err(e);
-    }
-
-    Ok(dest_dir.to_path_buf())
-}
-
-/// [`download_model_with_progress`] が取得段階の境界で通知する進捗フェーズ。
+/// [`download_variant`] が取得段階の境界で通知する進捗フェーズ。
 ///
 /// 「onnx 取得 → タグ定義取得 → 保存」の 3 段階に対応する（design 変更 4）。
-/// [`spawn_model_download`](crate::commands::adapters::spawn_model_download) が
-/// これを `Progress`（`done`/`total`）へ写像してフロントエンドへ emit する。
-///
-/// [`spawn_model_download`]: crate::commands::adapters::spawn_model_download
+/// ダウンロード起動アダプタがこれを `Progress`（`done`/`total`）へ写像して
+/// フロントエンドへ emit する。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DownloadPhase {
     /// `model.onnx` を取得完了。
@@ -1116,34 +914,56 @@ pub enum DownloadPhase {
     Saved,
 }
 
-/// [`download_model`] と同じ同期コアを、取得段階ごとの進捗通知とキャンセル確認
-/// 付きで実行する薄いラッパ（design 変更 4）。
+/// `variant.source` から `.onnx` とタグ定義を取得し `variant_dir` へ原子的に保存する
+/// （要件 2.6, 5.4, 5.5, 5.6, 5.8, 6.1〜6.6）。
 ///
-/// 既存 `download_model` のシグネチャ・再試行・原子的保存・部分ファイル除去の
-/// 挙動はそのまま [`download_model`] へ委譲し変更しない。本関数は取得段の境界
-/// （onnx 取得完了後／タグ定義取得完了後／保存後）で `on_progress` を呼び、
-/// 各境界で `cancel` が `true` になっていれば残りの処理を中断して
-/// [`crate::error::AppErrorKind::Cancelled`] を返す。
+/// 旧 `download_model` / `download_model_with_progress` を一本化した唯一の取得
+/// エントリ。進捗通知（`on_progress`）とキャンセル確認（`cancel`）を常に備え、
+/// 進捗不要な呼び出しには空クロージャ（`|_| {}`）を渡す。
+///
+/// 取得元は旧 `ModelLocation` 分岐を廃し `variant.source` を用いる:
+///
+/// - repo = `variant.source.repo`
+/// - `.onnx` の取得元ファイル名 = `variant.source.onnx_file`
+/// - タグ定義候補 = `variant.source.tag_files`（先頭優先、最初に成功したものを採用）
+///
+/// # 保存名
+///
+/// `.onnx` は [`load_variant`] が拡張子 `.onnx` で検出できるよう、`source.onnx_file`
+/// のベース名（拡張子 `.onnx`）で保存する（ML-Danbooru の `foo.onnx` のように
+/// リポジトリ内パスを持つ場合もベース名だけを保存名にする）。タグ定義は採用した
+/// 候補名で保存する（`.csv`/`.json` の拡張子が保たれる）。
+///
+/// # 新規 / 上書きの分岐（要件 5.8, Property 10）
+///
+/// 開始時に `variant_dir` が既に Model_Present（[`is_present`]）かを記録する。
+///
+/// - **新規（開始時 Not_Present）**: 失敗・キャンセル時は本操作が作成した部分
+///   ファイルを除去し Not_Present へ戻す（要件 2.6/5.4/5.6/6.5）。
+/// - **上書き（開始時 Present）**: 全取得成功後にのみ既存 `.onnx`/タグ定義を新規
+///   取得分で置き換える。取得段で失敗・キャンセルした場合は既存 Assets に一切手を
+///   触れず Present を維持する（要件 5.8）。保存段では既存の対を `.bak` へ退避 →
+///   新規を配置 → 成功時に `.bak` を削除、いずれかの配置に失敗したら `.bak` から
+///   復元してロールバックする（片方だけ壊れることを防ぐ）。
 ///
 /// # 引数
 ///
-/// - `downloader`: ファイル取得トランスポート（実 `HfHubDownloader` もモックも可）。
-/// - `variant` / `dest_dir`: [`download_model`] と同じ。
-/// - `cancel`: キャンセル要求フラグ（[`crate::commands::CancelRegistry::register`]
-///   が返す共有ハンドル）。取得段の境界でのみ確認する（バイト取得の途中では
-///   確認しない。トランスポート自体の中断は行わない）。
-/// - `on_progress`: 各段階完了時に呼ばれるコールバック。
+/// - `downloader`: ファイル取得トランスポート（実 [`HfHubDownloader`] もモックも可）。
+/// - `variant`: 取得対象。`variant.source` から repo/ファイル名/タグ定義候補を得る。
+/// - `variant_dir`: 保存先ディレクトリ（[`variant_dir`] が割り当てる一意なパス）。
+/// - `cancel`: キャンセル要求フラグ。取得段の境界でのみ確認する。
+/// - `on_progress`: 各段階（onnx 取得 → タグ定義取得 → 保存）完了時のコールバック。
 ///
-/// # キャンセルの扱い
+/// # エラー
 ///
-/// `cancel` が `true` の場合、以降の段階へ進まず即座に
-/// `Err(AppError::cancelled(..))` を返す。この時点までに保存済みのファイルは
-/// 存在しない（保存は最終段でのみ行うため、キャンセルは常に「保存前」で
-/// 発生する）。
-pub fn download_model_with_progress<D, F>(
+/// - `.onnx`/タグ定義のダウンロード最終失敗 → `Err(Download)`（要件 6.1〜6.3）。
+/// - `tag_files` が空 → `Err(Download)`（取得すべきタグ定義が定義されていない）。
+/// - 保存（ディレクトリ作成・書込・リネーム）失敗 → `Err(Io/AccessDenied)`。
+/// - キャンセル → `Err(Cancelled)`（要件 5.4）。
+pub fn download_variant<D, F>(
     downloader: &D,
     variant: &ModelVariant,
-    dest_dir: &Path,
+    variant_dir: &Path,
     cancel: &std::sync::atomic::AtomicBool,
     mut on_progress: F,
 ) -> AppResult<std::path::PathBuf>
@@ -1153,40 +973,46 @@ where
 {
     use std::sync::atomic::Ordering;
 
-    let repo = match &variant.location {
-        ModelLocation::Remote(repo) => repo.as_str(),
-        ModelLocation::Local(_) => {
-            return Err(AppError::invalid_input(
-                "ローカルモデルはダウンロード対象ではありません",
-            ));
-        }
-    };
+    let repo = variant.source.repo.as_str();
+    let onnx_file = variant.source.onnx_file.as_str();
+
+    // 開始時に既に Model_Present か（= 上書きか新規か）を記録する（要件 5.8）。
+    let was_present = is_present(variant_dir);
 
     if cancel.load(Ordering::SeqCst) {
         return Err(AppError::cancelled("モデルダウンロードがキャンセルされました"));
     }
 
-    if let Err(e) = std::fs::create_dir_all(dest_dir) {
-        return Err(AppError::from(e).with_path(dest_dir.to_string_lossy().into_owned()));
+    // variant_dir を用意する。作成失敗（親が無い・権限不足など）は保存失敗。
+    if let Err(e) = std::fs::create_dir_all(variant_dir) {
+        return Err(AppError::from(e).with_path(variant_dir.to_string_lossy().into_owned()));
     }
 
-    // 1) model.onnx を取得する（再試行付き）。
-    let onnx_bytes = fetch_with_retry(downloader, repo, SAVED_ONNX_NAME)
-        .map_err(|e| download_error(repo, SAVED_ONNX_NAME, &e))?;
+    // 1) `.onnx` を取得する（再試行付き）。取得元は source.onnx_file。
+    let onnx_bytes = fetch_with_retry(downloader, repo, onnx_file)
+        .map_err(|e| download_error(repo, onnx_file, &e))?;
     on_progress(DownloadPhase::OnnxFetched);
 
     if cancel.load(Ordering::SeqCst) {
+        // 取得段のキャンセル: まだ保存していないので既存 Assets には触れていない。
         return Err(AppError::cancelled("モデルダウンロードがキャンセルされました"));
     }
 
-    // 2) タグ定義を候補順に取得する。
-    let candidates = tag_definition_candidates(variant);
-    let mut tagdef: Option<(&'static str, Vec<u8>)> = None;
+    // 2) タグ定義を source.tag_files の順に取得する。最初に成功した候補名で保存する。
+    let candidates = &variant.source.tag_files;
+    if candidates.is_empty() {
+        return Err(download_error(
+            repo,
+            "tag-definition",
+            &DownloadError::Other("タグ定義候補が定義されていません".to_string()),
+        ));
+    }
+    let mut tagdef: Option<(String, Vec<u8>)> = None;
     let mut last_err: Option<DownloadError> = None;
-    for &name in candidates {
+    for name in candidates {
         match fetch_with_retry(downloader, repo, name) {
             Ok(bytes) => {
-                tagdef = Some((name, bytes));
+                tagdef = Some((name.clone(), bytes));
                 break;
             }
             Err(e) => last_err = Some(e),
@@ -1200,7 +1026,7 @@ where
             ));
             return Err(download_error(
                 repo,
-                candidates.first().copied().unwrap_or("tag-definition"),
+                candidates.first().map(|s| s.as_str()).unwrap_or("tag-definition"),
                 &e,
             ));
         }
@@ -1211,24 +1037,130 @@ where
         return Err(AppError::cancelled("モデルダウンロードがキャンセルされました"));
     }
 
-    // 3) 取得済みバイト列を原子的に保存する。
-    let onnx_dest = dest_dir.join(SAVED_ONNX_NAME);
-    let tagdef_dest = dest_dir.join(tagdef_name);
+    // 3) 保存先ファイル名を決める。onnx は source.onnx_file のベース名（拡張子 .onnx）。
+    let onnx_save_name = onnx_basename(onnx_file);
+    let onnx_dest = variant_dir.join(&onnx_save_name);
+    let tagdef_dest = variant_dir.join(&tagdef_name);
 
-    let save_result = (|| -> AppResult<()> {
-        atomic_write(&onnx_dest, &onnx_bytes)?;
-        atomic_write(&tagdef_dest, &tagdef_bytes)?;
-        Ok(())
-    })();
-
-    if let Err(e) = save_result {
-        let _ = std::fs::remove_file(&onnx_dest);
-        let _ = std::fs::remove_file(&tagdef_dest);
-        return Err(e);
+    // 取得はすべて成功済み。ここから保存段。上書き（was_present）と新規で分岐する。
+    if was_present {
+        save_overwrite(&onnx_dest, &onnx_bytes, &tagdef_dest, &tagdef_bytes)?;
+    } else {
+        let save_result = (|| -> AppResult<()> {
+            atomic_write(&onnx_dest, &onnx_bytes)?;
+            atomic_write(&tagdef_dest, &tagdef_bytes)?;
+            Ok(())
+        })();
+        if let Err(e) = save_result {
+            // 新規時の保存失敗: 本操作が作成した部分ファイルを除去し Not_Present へ戻す。
+            let _ = std::fs::remove_file(&onnx_dest);
+            let _ = std::fs::remove_file(&tagdef_dest);
+            return Err(e);
+        }
     }
     on_progress(DownloadPhase::Saved);
 
-    Ok(dest_dir.to_path_buf())
+    Ok(variant_dir.to_path_buf())
+}
+
+/// リポジトリ内 `.onnx` パス（例 `sub/foo.onnx`）から保存用のベース名を取り出す。
+///
+/// [`load_variant`] は拡張子 `.onnx`（大小無視）で検出するため、リポジトリ内の
+/// ディレクトリ構造は保存名へ持ち込まずファイル名部分のみを用いる。ファイル名が
+/// 取り出せない異常時は既定の `model.onnx` にフォールバックする。
+fn onnx_basename(onnx_file: &str) -> String {
+    Path::new(onnx_file)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("model.onnx")
+        .to_string()
+}
+
+/// 上書き保存（開始時 Model_Present）を、失敗時に既存対を保持できる形で行う
+/// （要件 5.8, Property 10）。
+///
+/// 既存の対を `.bak` へ退避してから新規を [`atomic_write`] で配置し、両方の配置が
+/// 成功したら `.bak` を削除する。いずれかで失敗した場合は `.bak` から既存を復元して
+/// ロールバックし、既存 Assets（`.onnx` とタグ定義の対）を Model_Present のまま
+/// 維持する。片方だけ置き換わって対が壊れることを防ぐ。
+fn save_overwrite(
+    onnx_dest: &Path,
+    onnx_bytes: &[u8],
+    tagdef_dest: &Path,
+    tagdef_bytes: &[u8],
+) -> AppResult<()> {
+    let onnx_bak = backup_path(onnx_dest);
+    let tagdef_bak = backup_path(tagdef_dest);
+
+    // 既存を .bak へ退避（存在すれば）。退避失敗時はまだ何も壊していないので即返す。
+    let onnx_backed = backup_existing(onnx_dest, &onnx_bak)?;
+    let tagdef_backed = match backup_existing(tagdef_dest, &tagdef_bak) {
+        Ok(v) => v,
+        Err(e) => {
+            // onnx の退避は済んでいるので戻す。
+            if onnx_backed {
+                let _ = std::fs::rename(&onnx_bak, onnx_dest);
+            }
+            return Err(e);
+        }
+    };
+
+    // 新規を原子的に配置する。どちらかが失敗したら退避から復元してロールバックする。
+    let place = (|| -> AppResult<()> {
+        atomic_write(onnx_dest, onnx_bytes)?;
+        atomic_write(tagdef_dest, tagdef_bytes)?;
+        Ok(())
+    })();
+
+    match place {
+        Ok(()) => {
+            // 成功: 退避を削除して確定する。
+            if onnx_backed {
+                let _ = std::fs::remove_file(&onnx_bak);
+            }
+            if tagdef_backed {
+                let _ = std::fs::remove_file(&tagdef_bak);
+            }
+            Ok(())
+        }
+        Err(e) => {
+            // ロールバック: 新規に書けた分を除去し、退避から既存を復元する。
+            let _ = std::fs::remove_file(onnx_dest);
+            let _ = std::fs::remove_file(tagdef_dest);
+            if onnx_backed {
+                let _ = std::fs::rename(&onnx_bak, onnx_dest);
+            }
+            if tagdef_backed {
+                let _ = std::fs::rename(&tagdef_bak, tagdef_dest);
+            }
+            Err(e)
+        }
+    }
+}
+
+/// `<dest>.overwrite.bak` の退避先パスを返す。
+fn backup_path(dest: &Path) -> PathBuf {
+    let name = dest
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("model-file");
+    match dest.parent() {
+        Some(parent) => parent.join(format!("{name}.overwrite.bak")),
+        None => PathBuf::from(format!("{name}.overwrite.bak")),
+    }
+}
+
+/// `dest` が存在すれば `bak` へリネームして退避する。退避した場合 `Ok(true)`、
+/// 元から存在しなければ `Ok(false)`。リネーム失敗は `Err`。
+fn backup_existing(dest: &Path, bak: &Path) -> AppResult<bool> {
+    if dest.exists() {
+        std::fs::rename(dest, bak)
+            .map_err(|e| AppError::from(e).with_path(dest.to_string_lossy().into_owned()))?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
 }
 
 /// [`DownloadError`] を要件 15.7 のダウンロード失敗（`AppError::Download`）へ写像する。
@@ -1302,8 +1234,8 @@ fn atomic_write(dest: &Path, bytes: &[u8]) -> AppResult<()> {
 ///
 /// HuggingFace Hub のリポジトリからファイルを取得する薄いラッパ。`hf-hub` は
 /// ファイルをローカルキャッシュへ取得しそのパスを返すため、本ラッパはそのパスを
-/// 読み出してバイト列で返す。[`download_model`] 側で `dest_dir` へ改めて保存する
-/// ことで、要件 15.4（次回以降ローカル読込）を満たすアプリ管理下の配置にする。
+/// 読み出してバイト列で返す。[`download_variant`] 側で `variant_dir` へ改めて保存
+/// することで、要件 5.5（次回以降ローカル読込）を満たすアプリ管理下の配置にする。
 ///
 /// # テスト方針
 ///
@@ -1354,9 +1286,8 @@ pub(crate) mod download_model_tests {
     /// 取得を指定エラーで失敗させ、`fetch` の呼び出し回数を記録する（再試行回数の
     /// 検証用）。
     ///
-    /// `pub(crate)` として公開し、`commands::adapters` の
-    /// `spawn_model_download`/`download_model_with_progress` の単体テスト
-    /// （タスク 3.5）から実 HTTP ネットワークアクセスなしで再利用できるようにする。
+    /// `pub(crate)` として公開し、`commands::adapters` のダウンロード起動アダプタの
+    /// 単体テストから実 HTTP ネットワークアクセスなしで再利用できるようにする。
     pub(crate) struct MockDownloader {
         responses: HashMap<String, Vec<u8>>,
         always_fail: Option<DownloadError>,
@@ -1411,14 +1342,25 @@ pub(crate) mod download_model_tests {
         }
     }
 
-    /// テスト用のリモート WD14 バリアント。
+    use crate::models::ModelSource;
+    use std::sync::atomic::AtomicBool;
+
+    /// キャンセルされていない共有フラグ。
+    fn no_cancel() -> AtomicBool {
+        AtomicBool::new(false)
+    }
+
+    /// テスト用の WD14 バリアント（source ベース）。
     fn remote_wd14() -> ModelVariant {
         ModelVariant {
             id: "wd14-vit".to_string(),
             display_name: "WD14 ViT".to_string(),
             family: ModelFamily::Wd14,
-            location: ModelLocation::Remote("owner/wd14-vit".to_string()),
-            onnx_available: true,
+            source: ModelSource {
+                repo: "owner/wd14-vit".to_string(),
+                onnx_file: "model.onnx".to_string(),
+                tag_files: vec!["selected_tags.csv".to_string()],
+            },
         }
     }
 
@@ -1433,77 +1375,143 @@ pub(crate) mod download_model_tests {
 
         let dir = tempdir().unwrap();
         let dest = dir.path().join("wd14-vit");
+        let cancel = no_cancel();
 
-        let returned = download_model(&downloader, &remote_wd14(), &dest).unwrap();
+        let returned =
+            download_variant(&downloader, &remote_wd14(), &dest, &cancel, |_| {}).unwrap();
         assert_eq!(returned, dest);
 
-        // 要件 15.4: model.onnx とタグ定義の対がローカル保存され、対として揃う。
+        // 要件 5.5: .onnx とタグ定義の対がローカル保存され、対として揃う。
         let onnx = dest.join("model.onnx");
         let tagdef = dest.join("selected_tags.csv");
         assert!(onnx.is_file(), "model.onnx が保存されるべき");
         assert!(tagdef.is_file(), "タグ定義が保存されるべき");
         assert_eq!(std::fs::read(&onnx).unwrap(), b"not-a-real-onnx-but-saved-verbatim");
 
-        // 保存したタグ定義は load_local_model の解析段（parse_tag_definition）が読める。
+        // 保存したタグ定義は load_variant の解析段（parse_tag_definition）が読める。
         let labels = parse_tag_definition(&tagdef).unwrap();
         assert_eq!(labels.len(), 2);
         assert_eq!(labels[0].name, "solo");
         assert_eq!(labels[1].category, TagCategory::Character);
 
-        // onnx_with_tagdef（17.1）も対として検出できる = 次回以降ローカル読込可能な形。
+        // onnx_with_tagdef も対として検出できる = 次回以降ローカル読込可能な形。
         assert!(super::onnx_with_tagdef(&dest).is_some());
     }
 
     #[test]
-    fn ml_danbooru_falls_back_to_alternate_tagdef_name() {
-        // ML-Danbooru は tags.csv を先頭候補にする。tags.csv を返すと採用される。
+    fn uses_source_onnx_file_and_saves_by_basename() {
+        // source.onnx_file がリポジトリ内パス（サブディレクトリ + 独自名）でも、
+        // 取得元はそのパス、保存名はベース名（拡張子 .onnx）になる（要件 1.6 / 5.5）。
         let csv = b"name,category\nsolo,0\n";
         let downloader = MockDownloader::with_responses(&[
-            ("model.onnx", b"onnx-bytes"),
+            ("ml_caformer_m36.onnx", b"onnx-bytes"),
             ("tags.csv", csv),
+        ]);
+        let variant = ModelVariant {
+            id: "ml-danbooru-caformer".to_string(),
+            display_name: "ML-Danbooru CAFormer".to_string(),
+            family: ModelFamily::MlDanbooru,
+            source: ModelSource {
+                repo: "owner/ml-danbooru".to_string(),
+                onnx_file: "ml_caformer_m36.onnx".to_string(),
+                tag_files: vec!["tags.csv".to_string(), "tags.json".to_string()],
+            },
+        };
+
+        let dir = tempdir().unwrap();
+        let dest = dir.path().join("ml-danbooru-caformer");
+        let cancel = no_cancel();
+        download_variant(&downloader, &variant, &dest, &cancel, |_| {}).unwrap();
+
+        // ベース名で .onnx が保存され、対が揃う。
+        assert!(dest.join("ml_caformer_m36.onnx").is_file());
+        assert!(dest.join("tags.csv").is_file());
+        assert!(super::onnx_with_tagdef(&dest).is_some());
+    }
+
+    #[test]
+    fn tag_files_fallback_to_second_candidate() {
+        // tag_files の先頭が取得できない場合、2 番目の候補にフォールバックする。
+        let json = br#"["solo","1girl"]"#;
+        let downloader = MockDownloader::with_responses(&[
+            ("model.onnx", b"onnx-bytes"),
+            ("tags.json", json),
         ]);
         let variant = ModelVariant {
             id: "ml-danbooru".to_string(),
             display_name: "ML-Danbooru".to_string(),
             family: ModelFamily::MlDanbooru,
-            location: ModelLocation::Remote("owner/ml-danbooru".to_string()),
-            onnx_available: true,
+            source: ModelSource {
+                repo: "owner/ml-danbooru".to_string(),
+                onnx_file: "model.onnx".to_string(),
+                tag_files: vec!["tags.csv".to_string(), "tags.json".to_string()],
+            },
         };
 
         let dir = tempdir().unwrap();
         let dest = dir.path().join("ml-danbooru");
-        download_model(&downloader, &variant, &dest).unwrap();
+        let cancel = no_cancel();
+        download_variant(&downloader, &variant, &dest, &cancel, |_| {}).unwrap();
 
-        assert!(dest.join("model.onnx").is_file());
-        assert!(dest.join("tags.csv").is_file());
+        // 先頭候補 tags.csv は保存されず、採用された tags.json が保存される。
+        assert!(!dest.join("tags.csv").exists());
+        assert!(dest.join("tags.json").is_file());
+        assert!(super::onnx_with_tagdef(&dest).is_some());
+    }
+
+    #[test]
+    fn empty_tag_files_yields_download_error() {
+        // tag_files が空なら取得すべきタグ定義が無く Download エラー。
+        let downloader = MockDownloader::with_responses(&[("model.onnx", b"onnx")]);
+        let variant = ModelVariant {
+            id: "no-tagdef".to_string(),
+            display_name: "No Tagdef".to_string(),
+            family: ModelFamily::Wd14,
+            source: ModelSource {
+                repo: "owner/no-tagdef".to_string(),
+                onnx_file: "model.onnx".to_string(),
+                tag_files: vec![],
+            },
+        };
+        let dir = tempdir().unwrap();
+        let dest = dir.path().join("no-tagdef");
+        let cancel = no_cancel();
+
+        let err = download_variant(&downloader, &variant, &dest, &cancel, |_| {}).unwrap_err();
+        assert_eq!(err.kind, crate::error::AppErrorKind::Download);
+        assert!(super::onnx_with_tagdef(&dest).is_none());
     }
 
     #[test]
     fn download_failing_every_attempt_yields_download_error_and_retries_three_times() {
-        // 全取得が失敗する。model.onnx の取得だけで最大 3 回まで再試行する。
+        // 全取得が失敗する。.onnx の取得だけで最大 3 回まで再試行する。
         let downloader = MockDownloader::always_failing(DownloadError::Timeout);
         let dir = tempdir().unwrap();
         let dest = dir.path().join("wd14-vit");
+        let cancel = no_cancel();
 
-        let err = download_model(&downloader, &remote_wd14(), &dest).unwrap_err();
+        let err =
+            download_variant(&downloader, &remote_wd14(), &dest, &cancel, |_| {}).unwrap_err();
         assert_eq!(err.kind, crate::error::AppErrorKind::Download);
 
-        // 要件 15.7: 最大 3 回試行する（model.onnx で 3 回呼ばれ、そこで打ち切る）。
+        // 要件 6.1/6.2: 最大 3 回試行する（.onnx で 3 回呼ばれ、そこで打ち切る）。
         assert_eq!(downloader.call_count(), MAX_DOWNLOAD_ATTEMPTS);
 
-        // 保存物は残らない（対が揃わない = 推論無効維持、要件 15.8 の趣旨）。
+        // 保存物は残らない（対が揃わない = Not_Present へ戻る、要件 6.5）。
         assert!(!dest.join("model.onnx").exists());
         assert!(super::onnx_with_tagdef(&dest).is_none());
     }
 
     #[test]
     fn tag_definition_download_failure_yields_download_error() {
-        // model.onnx は取得できるがタグ定義候補が全滅するケース。
+        // .onnx は取得できるがタグ定義候補が全滅するケース。
         let downloader = MockDownloader::with_responses(&[("model.onnx", b"onnx")]);
         let dir = tempdir().unwrap();
         let dest = dir.path().join("wd14-vit");
+        let cancel = no_cancel();
 
-        let err = download_model(&downloader, &remote_wd14(), &dest).unwrap_err();
+        let err =
+            download_variant(&downloader, &remote_wd14(), &dest, &cancel, |_| {}).unwrap_err();
         assert_eq!(err.kind, crate::error::AppErrorKind::Download);
         // 対が揃わないため、読み込める半端なモデルは残らない。
         assert!(super::onnx_with_tagdef(&dest).is_none());
@@ -1511,8 +1519,8 @@ pub(crate) mod download_model_tests {
 
     #[test]
     fn save_failure_leaves_no_usable_model() {
-        // dest_dir としてファイル（ディレクトリではない）を指定すると、
-        // create_dir_all または書込が失敗する（要件 15.8: 保存失敗）。
+        // variant_dir としてファイル（ディレクトリではない）を指定すると、
+        // create_dir_all または書込が失敗する（保存失敗）。
         let csv = b"tag_id,name,category\n1,solo,0\n";
         let downloader = MockDownloader::with_responses(&[
             ("model.onnx", b"onnx"),
@@ -1523,8 +1531,10 @@ pub(crate) mod download_model_tests {
         // dest 自体をファイルにする。
         let dest_as_file = dir.path().join("not-a-dir");
         std::fs::write(&dest_as_file, b"i am a file").unwrap();
+        let cancel = no_cancel();
 
-        let err = download_model(&downloader, &remote_wd14(), &dest_as_file).unwrap_err();
+        let err = download_variant(&downloader, &remote_wd14(), &dest_as_file, &cancel, |_| {})
+            .unwrap_err();
         // ディレクトリ作成/保存の I/O 失敗。Download ではなく保存系エラー。
         assert_ne!(err.kind, crate::error::AppErrorKind::Download);
         // ファイルはそのまま（ディレクトリ化されていない）= 使えるモデルは残らない。
@@ -1533,18 +1543,104 @@ pub(crate) mod download_model_tests {
     }
 
     #[test]
-    fn local_variant_is_rejected() {
-        let downloader = MockDownloader::with_responses(&[]);
-        let variant = ModelVariant {
-            id: "local".to_string(),
-            display_name: "local".to_string(),
-            family: ModelFamily::Local,
-            location: ModelLocation::Local("/tmp/x/model.onnx".to_string()),
-            onnx_available: true,
-        };
+    fn cancel_before_start_yields_cancelled() {
+        // 開始前にキャンセル済みなら取得せず Cancelled。
+        let downloader = MockDownloader::with_responses(&[
+            ("model.onnx", b"onnx"),
+            ("selected_tags.csv", b"tag_id,name,category\n1,solo,0\n"),
+        ]);
         let dir = tempdir().unwrap();
-        let err = download_model(&downloader, &variant, dir.path()).unwrap_err();
-        assert_eq!(err.kind, crate::error::AppErrorKind::InvalidInput);
+        let dest = dir.path().join("wd14-vit");
+        let cancel = AtomicBool::new(true);
+
+        let err =
+            download_variant(&downloader, &remote_wd14(), &dest, &cancel, |_| {}).unwrap_err();
+        assert_eq!(err.kind, crate::error::AppErrorKind::Cancelled);
+        assert!(super::onnx_with_tagdef(&dest).is_none());
+    }
+
+    #[test]
+    fn progress_phases_are_reported_in_order() {
+        // 進捗フェーズが onnx → tagdef → saved の順で通知される。
+        let csv = b"tag_id,name,category\n1,solo,0\n";
+        let downloader = MockDownloader::with_responses(&[
+            ("model.onnx", b"onnx"),
+            ("selected_tags.csv", csv),
+        ]);
+        let dir = tempdir().unwrap();
+        let dest = dir.path().join("wd14-vit");
+        let cancel = no_cancel();
+
+        let mut phases = Vec::new();
+        download_variant(&downloader, &remote_wd14(), &dest, &cancel, |p| phases.push(p))
+            .unwrap();
+        assert_eq!(
+            phases,
+            vec![
+                DownloadPhase::OnnxFetched,
+                DownloadPhase::TagDefinitionFetched,
+                DownloadPhase::Saved,
+            ]
+        );
+    }
+
+    #[test]
+    fn overwrite_success_replaces_existing_assets() {
+        // 既存 Present に対する上書き成功で、新規バイト列に置き換わる（要件 5.8 の成功側）。
+        let dir = tempdir().unwrap();
+        let dest = dir.path().join("wd14-vit");
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::write(dest.join("model.onnx"), b"old-onnx").unwrap();
+        std::fs::write(
+            dest.join("selected_tags.csv"),
+            b"tag_id,name,category\n1,old,0\n",
+        )
+        .unwrap();
+        assert!(super::is_present(&dest));
+
+        let new_csv = b"tag_id,name,category\n1,newtag,0\n";
+        let downloader = MockDownloader::with_responses(&[
+            ("model.onnx", b"new-onnx"),
+            ("selected_tags.csv", new_csv),
+        ]);
+        let cancel = no_cancel();
+        download_variant(&downloader, &remote_wd14(), &dest, &cancel, |_| {}).unwrap();
+
+        assert_eq!(std::fs::read(dest.join("model.onnx")).unwrap(), b"new-onnx");
+        assert_eq!(
+            std::fs::read(dest.join("selected_tags.csv")).unwrap(),
+            new_csv
+        );
+        // 退避ファイルは残らない。
+        assert!(!dest.join("model.onnx.overwrite.bak").exists());
+        assert!(!dest.join("selected_tags.csv.overwrite.bak").exists());
+        assert!(super::is_present(&dest));
+    }
+
+    #[test]
+    fn overwrite_fetch_failure_keeps_existing_assets() {
+        // 既存 Present に対する上書きで取得段が失敗すると、既存対は保持される（要件 5.8）。
+        let dir = tempdir().unwrap();
+        let dest = dir.path().join("wd14-vit");
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::write(dest.join("model.onnx"), b"old-onnx").unwrap();
+        std::fs::write(
+            dest.join("selected_tags.csv"),
+            b"tag_id,name,category\n1,old,0\n",
+        )
+        .unwrap();
+        assert!(super::is_present(&dest));
+
+        // 取得は全失敗（.onnx すら取れない）。
+        let downloader = MockDownloader::always_failing(DownloadError::Timeout);
+        let cancel = no_cancel();
+        let err =
+            download_variant(&downloader, &remote_wd14(), &dest, &cancel, |_| {}).unwrap_err();
+        assert_eq!(err.kind, crate::error::AppErrorKind::Download);
+
+        // 既存 Assets は無傷で Present のまま（要件 5.8）。
+        assert_eq!(std::fs::read(dest.join("model.onnx")).unwrap(), b"old-onnx");
+        assert!(super::is_present(&dest));
     }
 }
 
@@ -1552,10 +1648,10 @@ pub(crate) mod download_model_tests {
 // タスク 17.5: モデル異常系の単体テスト（要件 15.6 / 15.7 / 15.8 の補完）
 // ---------------------------------------------------------------------------
 //
-// 既存の `load_local_model_tests` / `download_model_tests` が個別ケースを網羅する
+// 既存の `load_variant_tests` / `download_model_tests` が個別ケースを網羅する
 // のに対し、本節は要件文言そのものを焦点に据えた補完テストを追加する:
 //
-// - 15.6: load_local_model が失敗した場合、LoadedModel は生成されない（推論は無効の
+// - 15.6: load_variant が失敗した場合、LoadedModel は生成されない（推論は無効の
 //   まま維持）。ONNX 読込不可とタグ定義欠落を「区別して」いずれも Err(ModelLoad)
 //   になることを確認する。
 // - 15.7: 再試行の境界を呼び出しカウンタで厳密に検証する。ちょうど上限回だけ失敗
@@ -1563,7 +1659,7 @@ pub(crate) mod download_model_tests {
 //   打ち切られるため Err(Download) となり、上限内の最終試行で成功するダウンローダは
 //   Ok になる。
 // - 15.8: 保存に失敗した場合、使えるモデルは残らない（onnx_with_tagdef が None、
-//   保存失敗後も load_local_model は Err のまま = 推論無効維持）。
+//   保存失敗後も load_variant は Err のまま = 推論無効維持）。
 //
 // いずれもネットワーク非依存で、tempfile と（15.7 用の）呼び出しカウント式モックを
 // 用いる。
@@ -1587,7 +1683,7 @@ mod model_error_paths_tests {
         // ケース A: タグ定義欠落（.onnx はあるがタグ定義が無い）。
         let dir_a = tempdir().unwrap();
         fs::write(dir_a.path().join("model.onnx"), b"onnx").unwrap();
-        let result_a = load_local_model(dir_a.path());
+        let result_a = load_variant(dir_a.path());
         // LoadedModel は生成されない = 推論無効のまま。
         assert!(
             result_a.is_err(),
@@ -1603,7 +1699,7 @@ mod model_error_paths_tests {
             b"tag_id,name,category\n1,solo,0\n",
         )
         .unwrap();
-        let result_b = load_local_model(dir_b.path());
+        let result_b = load_variant(dir_b.path());
         assert!(
             result_b.is_err(),
             "ONNX 読込不可では LoadedModel を生成してはならない"
@@ -1678,10 +1774,12 @@ mod model_error_paths_tests {
         );
         let dir = tempdir().unwrap();
         let dest = dir.path().join("wd14-vit");
+        let cancel = no_cancel();
 
-        let err = download_model(&downloader, &remote_wd14(), &dest).unwrap_err();
+        let err = download_variant(&downloader, &remote_wd14(), &dest, &cancel, |_| {})
+            .unwrap_err();
         assert_eq!(err.kind, AppErrorKind::Download);
-        // 境界の厳密検証: model.onnx の取得でちょうど上限回だけ呼ばれて打ち切る。
+        // 境界の厳密検証: .onnx の取得でちょうど上限回だけ呼ばれて打ち切る。
         assert_eq!(downloader.call_count(), MAX_DOWNLOAD_ATTEMPTS);
         // 打ち切られたので使えるモデルは残らない。
         assert!(super::onnx_with_tagdef(&dest).is_none());
@@ -1699,25 +1797,34 @@ mod model_error_paths_tests {
         );
         let dir = tempdir().unwrap();
         let dest = dir.path().join("wd14-vit");
+        let cancel = no_cancel();
 
-        let returned = download_model(&downloader, &remote_wd14(), &dest)
+        let returned = download_variant(&downloader, &remote_wd14(), &dest, &cancel, |_| {})
             .expect("上限内の最終試行で成功するなら Ok になるべき");
         assert_eq!(returned, dest);
-        // 境界の厳密検証: model.onnx が上限内の最終試行（MAX 回目）で成功し、
+        // 境界の厳密検証: .onnx が上限内の最終試行（MAX 回目）で成功し、
         // タグ定義は続く 1 回で即成功する（通算 MAX + 1 回）。
         assert_eq!(downloader.call_count(), MAX_DOWNLOAD_ATTEMPTS + 1);
-        // 対が揃い、次回以降ローカル読込可能な形になっている（要件 15.4 の趣旨）。
+        // 対が揃い、次回以降ローカル読込可能な形になっている（要件 5.5 の趣旨）。
         assert!(super::onnx_with_tagdef(&dest).is_some());
     }
 
-    /// テスト用のリモート WD14 バリアント（download_model_tests と同じ形）。
+    /// キャンセルされていない共有フラグ。
+    fn no_cancel() -> std::sync::atomic::AtomicBool {
+        std::sync::atomic::AtomicBool::new(false)
+    }
+
+    /// テスト用の WD14 バリアント（source ベース）。
     fn remote_wd14() -> ModelVariant {
         ModelVariant {
             id: "wd14-vit".to_string(),
             display_name: "WD14 ViT".to_string(),
             family: ModelFamily::Wd14,
-            location: ModelLocation::Remote("owner/wd14-vit".to_string()),
-            onnx_available: true,
+            source: crate::models::ModelSource {
+                repo: "owner/wd14-vit".to_string(),
+                onnx_file: "model.onnx".to_string(),
+                tag_files: vec!["selected_tags.csv".to_string()],
+            },
         }
     }
 
@@ -1736,7 +1843,7 @@ mod model_error_paths_tests {
             file: &str,
             _timeout: Duration,
         ) -> Result<Vec<u8>, DownloadError> {
-            if file == SAVED_ONNX_NAME {
+            if file == "model.onnx" {
                 Ok(self.onnx.clone())
             } else {
                 Ok(self.tagdef.clone())
@@ -1745,7 +1852,7 @@ mod model_error_paths_tests {
     }
 
     #[test]
-    fn save_failure_leaves_dir_unloadable_by_load_local_model() {
+    fn save_failure_leaves_dir_unloadable_by_load_variant() {
         // dest をファイルにして保存（ディレクトリ作成）を失敗させる（要件 15.8）。
         let downloader = AlwaysOkDownloader {
             onnx: b"onnx".to_vec(),
@@ -1754,15 +1861,17 @@ mod model_error_paths_tests {
         let dir = tempdir().unwrap();
         let dest_as_file = dir.path().join("occupied");
         fs::write(&dest_as_file, b"i am a file, not a dir").unwrap();
+        let cancel = no_cancel();
 
-        let err = download_model(&downloader, &remote_wd14(), &dest_as_file).unwrap_err();
+        let err = download_variant(&downloader, &remote_wd14(), &dest_as_file, &cancel, |_| {})
+            .unwrap_err();
         // 保存系の失敗であり、ダウンロード失敗（Download）ではない。
         assert_ne!(err.kind, AppErrorKind::Download);
 
-        // 使えるモデルは残らない: 対は成立せず、load_local_model も Err のまま。
+        // 使えるモデルは残らない: 対は成立せず、load_variant も Err のまま。
         assert!(super::onnx_with_tagdef(&dest_as_file).is_none());
         assert!(
-            load_local_model(&dest_as_file).is_err(),
+            load_variant(&dest_as_file).is_err(),
             "保存失敗後は推論を有効化できてはならない"
         );
     }
@@ -1770,17 +1879,357 @@ mod model_error_paths_tests {
     #[test]
     fn failed_download_dir_still_not_loadable_after_retry_exhaustion() {
         // ダウンロードが再試行上限まで失敗した後、そのディレクトリは
-        // load_local_model で読み込めない（推論無効維持、15.7 → 15.8 の趣旨）。
+        // load_variant で読み込めない（推論無効維持、15.7 → 15.8 の趣旨）。
         let downloader = SucceedOnAttempt::new(usize::MAX, b"never");
         let dir = tempdir().unwrap();
         let dest = dir.path().join("wd14-vit");
+        let cancel = no_cancel();
 
-        let err = download_model(&downloader, &remote_wd14(), &dest).unwrap_err();
+        let err = download_variant(&downloader, &remote_wd14(), &dest, &cancel, |_| {})
+            .unwrap_err();
         assert_eq!(err.kind, AppErrorKind::Download);
-        // 保存物が無い（または対が揃わない）ので load_local_model は Err。
+        // 保存物が無い（または対が揃わない）ので load_variant は Err。
         assert!(
-            load_local_model(&dest).is_err(),
+            load_variant(&dest).is_err(),
             "ダウンロード失敗後のディレクトリは読み込めてはならない"
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// タスク 2.1: Model_Dir 解決・Variant 配置・Model_Dir 作成
+// ---------------------------------------------------------------------------
+//
+// 本節は「モデル配置フォルダ（Model_Dir）」の解決と、Variant ごとの一意な保存先
+// （variant_dir）の割り当て、および Model_Dir の作成を担う。いずれも設計の
+// ModelService セクションおよび Correctness Property 4 / 5 に対応する。
+//
+// 要件との対応:
+//
+// - 要件 2.1: Model_Dir をインストール基準ディレクトリ `base_dir` 配下の固定相対
+//   パスとして解決し、絶対パスとして返す。→ [`resolve_model_dir`]。
+// - 要件 2.3: 取得済み Model_Assets を Variant ごとに一意な配置で Model_Dir 配下へ
+//   保存する。→ [`variant_dir`]（`resolve_model_dir(base_dir)/<variant.id>`）。
+// - 要件 2.2: Download_Operation 開始時に Model_Dir が無ければ書き込みに先立って
+//   作成する。→ [`ensure_model_dir`]。
+// - 要件 2.4/2.5: Model_Dir 作成失敗・権限不足はエラー。→ [`ensure_model_dir`] が
+//   `Io` / `AccessDenied`（`From<std::io::Error>` による写像）で返す。
+//
+// # 設計上の取り決め（決定性 / 純粋関数）
+//
+// `resolve_model_dir` は Property 4（同一 `base_dir` に対し常に同一の絶対パスを返し、
+// 結果は `base_dir` を接頭辞に持つ固定相対パスの結合である）を満たす純粋関数とする。
+// このため実ファイルシステムへの問い合わせ（`canonicalize` 等、存在に依存し非決定的）
+// は行わず、`base_dir` に固定相対パス [`MODEL_DIR_RELATIVE`] を結合するだけにする。
+// 実 `base_dir`（Tauri PathResolver 由来の絶対パス）はアプリ層から供給される前提。
+//
+// _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
+
+use std::path::PathBuf;
+
+/// Model_Dir を表す、インストール基準ディレクトリからの固定相対パス（要件 2.1）。
+///
+/// 決定的にするため定数として固定する。`base_dir` にこの相対パスを結合したものが
+/// Model_Dir となる。
+const MODEL_DIR_RELATIVE: &str = "models";
+
+/// インストール基準ディレクトリ `base_dir` から Model_Dir を解決する純粋関数。
+///
+/// `base_dir` に固定相対パス [`MODEL_DIR_RELATIVE`] を結合して返す。実ファイル
+/// システムへ問い合わせないため、同一 `base_dir` に対し常に同一パスを返す
+/// （決定性、Property 4）。`base_dir` が絶対パスであれば戻り値も絶対パスになる
+/// （実運用では Tauri PathResolver が絶対パスを供給する、要件 2.1）。
+pub fn resolve_model_dir(base_dir: &Path) -> PathBuf {
+    base_dir.join(MODEL_DIR_RELATIVE)
+}
+
+/// Variant ごとに一意な保存先（`resolve_model_dir(base_dir)/<variant.id>`）を返す
+/// 純粋関数（要件 2.3）。
+///
+/// `variant.id` はカタログ全体で一意（要件 1.7）なので、識別子が相異なる 2 つの
+/// Variant は相異なる保存先を持つ（Property 5）。
+pub fn variant_dir(base_dir: &Path, variant: &ModelVariant) -> PathBuf {
+    resolve_model_dir(base_dir).join(&variant.id)
+}
+
+/// Model_Dir（またはその配下の任意のモデル配置ディレクトリ）を、未作成なら作成する
+/// （要件 2.2）。
+///
+/// 既に存在する場合は何もしない（冪等）。中間ディレクトリも含めて作成する。
+///
+/// # エラー（要件 2.4/2.5）
+///
+/// 作成に失敗した場合は `From<std::io::Error>` の写像により、権限不足は
+/// `AccessDenied`、その他の I/O 失敗は `Io`（不在の親などは `NotFound`）として
+/// `Err` を返す。呼び出し側（Download_Operation）はこれを検知して中止する。
+pub fn ensure_model_dir(model_dir: &Path) -> AppResult<()> {
+    std::fs::create_dir_all(model_dir)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod model_dir_tests {
+    use super::*;
+    use crate::models::{ModelFamily, ModelSource};
+    use tempfile::tempdir;
+
+    /// テスト用の Variant を組み立てる。
+    fn variant(id: &str) -> ModelVariant {
+        ModelVariant {
+            id: id.to_string(),
+            display_name: id.to_string(),
+            family: ModelFamily::Wd14,
+            source: ModelSource {
+                repo: format!("repo/{id}"),
+                onnx_file: "model.onnx".to_string(),
+                tag_files: vec!["selected_tags.csv".to_string()],
+            },
+        }
+    }
+
+    #[test]
+    fn resolve_model_dir_is_deterministic() {
+        // 同一入力に対し常に同一パスを返す（Property 4 の決定性）。
+        let base = Path::new("/opt/tageditor");
+        let a = resolve_model_dir(base);
+        let b = resolve_model_dir(base);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn resolve_model_dir_is_prefixed_by_base_dir() {
+        // 結果は base_dir を接頭辞に持つ固定相対パスの結合（Property 4）。
+        let base = Path::new("/opt/tageditor");
+        let dir = resolve_model_dir(base);
+        assert!(dir.starts_with(base));
+        assert_eq!(dir, base.join(MODEL_DIR_RELATIVE));
+    }
+
+    #[test]
+    fn resolve_model_dir_preserves_absoluteness() {
+        // 絶対パスの base_dir からは絶対パスが返る（要件 2.1）。
+        // 絶対パスの表現はプラットフォーム依存（Windows はドライブレターが必要）。
+        let base = if cfg!(windows) {
+            Path::new("C:\\opt\\tageditor")
+        } else {
+            Path::new("/opt/tageditor")
+        };
+        assert!(resolve_model_dir(base).is_absolute());
+    }
+
+    #[test]
+    fn variant_dir_is_under_model_dir_with_id() {
+        let base = Path::new("/opt/tageditor");
+        let v = variant("wd14-vit");
+        let vdir = variant_dir(base, &v);
+        assert_eq!(vdir, resolve_model_dir(base).join("wd14-vit"));
+        assert!(vdir.starts_with(resolve_model_dir(base)));
+    }
+
+    #[test]
+    fn distinct_ids_yield_distinct_variant_dirs() {
+        // 識別子が相異なる 2 Variant の保存先は相異なる（Property 5）。
+        let base = Path::new("/opt/tageditor");
+        let a = variant_dir(base, &variant("wd14-vit"));
+        let b = variant_dir(base, &variant("wd14-convnext"));
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn ensure_model_dir_creates_missing_directory() {
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("models").join("wd14-vit");
+        assert!(!target.exists());
+        ensure_model_dir(&target).unwrap();
+        assert!(target.is_dir());
+    }
+
+    #[test]
+    fn ensure_model_dir_is_idempotent_when_present() {
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("models");
+        ensure_model_dir(&target).unwrap();
+        // 2 回目も成功する（既存でもエラーにしない）。
+        ensure_model_dir(&target).unwrap();
+        assert!(target.is_dir());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// タスク 4.1: 存在判定（is_present）とカタログ全体の取得状態（catalog_presence）
+// ---------------------------------------------------------------------------
+//
+// 本節はカタログ定義（静的）と取得状態（動的）の分離方針に基づき、Model_Dir 配下を
+// 走査して各 Variant の Model_Present / Not_Present を求める。判定は純粋な
+// ファイルシステム走査で、設計の ModelService `catalog_presence` および
+// Correctness Property 6 に対応する。
+//
+// 要件との対応:
+//
+// - 要件 3.2: `.onnx` と拡張子 `.csv`/`.json` のタグ定義の対が variant_dir 配下に
+//   揃うときに限り Model_Present。→ [`is_present`]（[`onnx_with_tagdef`] を再利用）。
+// - 要件 3.3/3.4: `.onnx` のみ・タグ定義のみは Model_Present と判定しない。
+//   → [`onnx_with_tagdef`] が対の成立時のみ `Some` を返すため bool 化で満たす。
+// - 要件 3.1: カタログ各 Variant について variant_dir を走査し一意な状態を返す。
+//   → [`catalog_presence`]。
+// - 要件 3.5/3.6: Model_Dir が未作成、または Model_Dir はあるが Assets が無い場合は
+//   全件 Not_Present。→ variant_dir 不在は `read_dir` 失敗で `false`、Model_Dir
+//   未作成なら各 variant_dir も当然不在で全件 `false`。
+//
+// # 設計上の取り決め（onnx_with_tagdef の再利用）
+//
+// 存在判定は [`onnx_with_tagdef`] を再利用する。同関数は variant_dir 直下を走査し、
+// `.onnx` と `.csv`/`.json` タグ定義の対が揃うときのみ `Some(onnx_path)` を返す
+// （拡張子は `to_ascii_lowercase` で正規化するため `.ONNX`/`.CSV` の大文字も判定
+// できる）。よって [`is_present`] はその `Some`/`None` を `true`/`false` へ写すだけで
+// Property 6 の同値性（対が揃う ⇔ Model_Present）を満たす。
+//
+// _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6_
+
+/// `variant_dir` 配下が Model_Present か否かを判定する（要件 3.2, 3.3, 3.4）。
+///
+/// `variant_dir` 直下に `.onnx` と、拡張子 `.csv`/`.json`（大小無視）のタグ定義の
+/// 対がともに存在するときに限り `true`。`.onnx` のみ・タグ定義のみ・ディレクトリ
+/// 不在・空ディレクトリはいずれも `false`（Property 6）。
+///
+/// 判定は [`onnx_with_tagdef`] を再利用し、その `Some`/`None` を bool 化する。
+pub fn is_present(variant_dir: &Path) -> bool {
+    onnx_with_tagdef(variant_dir).is_some()
+}
+
+/// Model_Dir 配下を走査し、カタログ各 Variant の取得状態を返す（要件 3.1）。
+///
+/// `catalog` の各 Variant について [`variant_dir`]`(base_dir, variant)` を
+/// [`is_present`] で判定し、[`VariantPresence`] を組み立てて返す。Model_Dir
+/// （[`resolve_model_dir`]`(base_dir)`）が未作成なら各 variant_dir も不在となり、
+/// 全件 `present = false`（Not_Present）になる（要件 3.5, 3.6）。
+///
+/// 戻り値は `catalog` と同順・同要素数で、各 Variant にちょうど 1 つの状態を対応
+/// させる（要件 3.1 の一意な状態）。
+pub fn catalog_presence(base_dir: &Path, catalog: &[ModelVariant]) -> Vec<VariantPresence> {
+    catalog
+        .iter()
+        .map(|variant| {
+            let dir = variant_dir(base_dir, variant);
+            VariantPresence {
+                variant: variant.clone(),
+                present: is_present(&dir),
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod presence_tests {
+    use super::*;
+    use crate::models::{ModelFamily, ModelSource};
+    use std::fs;
+    use tempfile::tempdir;
+
+    /// テスト用の Variant を組み立てる。
+    fn variant(id: &str) -> ModelVariant {
+        ModelVariant {
+            id: id.to_string(),
+            display_name: id.to_string(),
+            family: ModelFamily::Wd14,
+            source: ModelSource {
+                repo: format!("repo/{id}"),
+                onnx_file: "model.onnx".to_string(),
+                tag_files: vec!["selected_tags.csv".to_string()],
+            },
+        }
+    }
+
+    #[test]
+    fn is_present_true_when_onnx_and_tagdef_pair_exists() {
+        // `.onnx` と `.csv` の対が揃う → Model_Present（要件 3.2）。
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("model.onnx"), b"onnx").unwrap();
+        fs::write(dir.path().join("selected_tags.csv"), b"tag_id,name,category\n1,solo,0\n")
+            .unwrap();
+        assert!(is_present(dir.path()));
+    }
+
+    #[test]
+    fn is_present_true_with_json_tagdef() {
+        // タグ定義が `.json` でも対が揃えば Model_Present（要件 3.2）。
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("model.onnx"), b"onnx").unwrap();
+        fs::write(dir.path().join("tags.json"), br#"["solo"]"#).unwrap();
+        assert!(is_present(dir.path()));
+    }
+
+    #[test]
+    fn is_present_true_with_uppercase_extensions() {
+        // 大文字拡張子（.ONNX/.CSV）も onnx_with_tagdef が正規化して判定する。
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("MODEL.ONNX"), b"onnx").unwrap();
+        fs::write(dir.path().join("TAGS.CSV"), b"tag_id,name,category\n1,solo,0\n").unwrap();
+        assert!(is_present(dir.path()));
+    }
+
+    #[test]
+    fn is_present_false_when_only_onnx() {
+        // `.onnx` のみ → Not_Present（要件 3.3）。
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("model.onnx"), b"onnx").unwrap();
+        assert!(!is_present(dir.path()));
+    }
+
+    #[test]
+    fn is_present_false_when_only_tagdef() {
+        // タグ定義のみ → Not_Present（要件 3.4）。
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("selected_tags.csv"), b"tag_id,name,category\n1,solo,0\n")
+            .unwrap();
+        assert!(!is_present(dir.path()));
+    }
+
+    #[test]
+    fn is_present_false_when_dir_empty() {
+        // 空ディレクトリ → Not_Present（要件 3.6）。
+        let dir = tempdir().unwrap();
+        assert!(!is_present(dir.path()));
+    }
+
+    #[test]
+    fn is_present_false_when_dir_absent() {
+        // ディレクトリ不在 → Not_Present（要件 3.5）。
+        let dir = tempdir().unwrap();
+        let absent = dir.path().join("does-not-exist");
+        assert!(!is_present(&absent));
+    }
+
+    #[test]
+    fn catalog_presence_marks_only_prepared_variants_present() {
+        // base_dir 配下に Model_Dir を作り、片方の variant だけ対を配置する。
+        let base = tempdir().unwrap();
+        let catalog = vec![variant("wd14-vit"), variant("wd14-convnext")];
+
+        let ready = variant_dir(base.path(), &catalog[0]);
+        fs::create_dir_all(&ready).unwrap();
+        fs::write(ready.join("model.onnx"), b"onnx").unwrap();
+        fs::write(ready.join("selected_tags.csv"), b"tag_id,name,category\n1,solo,0\n")
+            .unwrap();
+
+        let presence = catalog_presence(base.path(), &catalog);
+        assert_eq!(presence.len(), 2);
+        assert_eq!(presence[0].variant.id, "wd14-vit");
+        assert!(presence[0].present, "対を配置した variant は Model_Present");
+        assert_eq!(presence[1].variant.id, "wd14-convnext");
+        assert!(!presence[1].present, "未配置の variant は Not_Present");
+    }
+
+    #[test]
+    fn catalog_presence_all_not_present_when_model_dir_absent() {
+        // Model_Dir 未作成なら全件 Not_Present（要件 3.5）。
+        let base = tempdir().unwrap();
+        let catalog = vec![variant("a"), variant("b"), variant("c")];
+        // resolve_model_dir(base) は作成しない。
+        assert!(!resolve_model_dir(base.path()).exists());
+
+        let presence = catalog_presence(base.path(), &catalog);
+        assert_eq!(presence.len(), 3);
+        assert!(presence.iter().all(|p| !p.present));
     }
 }

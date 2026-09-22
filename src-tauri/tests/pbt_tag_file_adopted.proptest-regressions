@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 16f62e45bc209c84446cf048f17db7fa21cb965992807d1bdef55ed341dc9e17 # shrinks to outcome = FilterOutcome { adopted: [Tag { body: "猫a", confidence: None }], discarded: [Tag { body: "猫", confidence: None }] }

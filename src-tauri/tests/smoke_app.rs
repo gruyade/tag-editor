@@ -40,6 +40,21 @@ use tag_editor_core::models::{ChannelOrder, LabelDef, Progress, TagCategory};
 use tag_editor_core::services::inference_service::SessionRunner;
 use tag_editor_core::AppResult;
 
+/// confidence_threshold のみ設定した TagFilter を作る（旧 `threshold: f32` 相当）。
+fn threshold_filter(threshold: f32) -> tag_editor_core::models::TagFilter {
+    let (filter, _invalid) = tag_editor_core::logic::tag_filter::compile_filter(
+        tag_editor_core::models::RawTagFilter {
+            keep: Vec::new(),
+            exclude: Vec::new(),
+            replace: Vec::new(),
+            additional: Vec::new(),
+            confidence_threshold: threshold,
+            fraction_threshold: 0.0,
+        },
+    );
+    filter
+}
+
 // ---------------------------------------------------------------------------
 // 新コマンド登録・State 管理の確認（タスク 4、要件 2.1, 2.4, 2.5, 2.7）
 // ---------------------------------------------------------------------------
@@ -228,7 +243,7 @@ fn long_running_job_spawns_without_blocking_caller() {
 
     let job = InferenceJob {
         image_paths: paths,
-        threshold: 0.5,
+        filter: threshold_filter(0.5),
         batch_size: Some(1),
         labels: labels(&["a"]),
         input_size: 4,
@@ -318,7 +333,7 @@ fn long_running_job_honors_cancel_from_ui_thread() {
 
     let job = InferenceJob {
         image_paths: paths,
-        threshold: 0.5,
+        filter: threshold_filter(0.5),
         batch_size: Some(1),
         labels: labels(&["a"]),
         input_size: 4,

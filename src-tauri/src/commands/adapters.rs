@@ -220,43 +220,44 @@ pub fn delete_orphan_captions(
 // ModelService（要件 15）
 // ---------------------------------------------------------------------------
 
-/// モデル一覧（`model_service::list_models` へ委譲、要件 15.1, 15.5）。
+/// 組み込みカタログと取得状態の一覧（要件 1.1, 1.2, 3.1, 3.5）。
 ///
-/// ローカルモデルディレクトリと組み込みリモート候補から一覧を構築する。
+/// [`model_service::builtin_catalog`]（検証済みの登録カタログ）と
+/// [`model_service::catalog_presence`]（各バリアントの Model_Present /
+/// Not_Present 判定）を結合して [`CatalogListing`] を返す。`base_dir` は
+/// アプリ層が Tauri の PathResolver（[`resolve_base_dir`]）から供給する絶対
+/// パス。フロントエンドは `base_dir` を渡さずに呼べる（存在判定は同一 `base_dir`
+/// に対して [`spawn_variant_download`] / [`start_inference`] の保存・読込先と
+/// 整合する、要件 3.5）。
+///
+/// `model_dir_present` は Model_Dir（`resolve_model_dir(base_dir)`）の存在で
+/// 判定する（要件 3.5）。`excluded` は「必須フィールド欠落で除外した情報」
+/// （要件 1.4）だが、`builtin_catalog` は [`model_service::validate_catalog`] を
+/// 通した検証済みカタログで全て有効なため、実運用では空になる。動的な除外提示が
+/// 必要になった場合は `model_service` に除外集合も返す API を追加する。
 #[tauri::command]
-pub fn list_models(local_model_dir: Option<String>) -> AppResult<model_service::ModelListing> {
-    let remote = model_service::builtin_remote_variants();
-    let listing = match local_model_dir {
-        Some(dir) => model_service::list_models(Some(Path::new(&dir)), &remote),
-        None => model_service::list_models(None, &remote),
-    };
-    Ok(listing)
+pub fn list_catalog(app: tauri::AppHandle) -> AppResult<crate::models::CatalogListing> {
+    let base_path = resolve_base_dir(&app);
+
+    let catalog = model_service::builtin_catalog();
+    let variants = model_service::catalog_presence(&base_path, &catalog);
+    let model_dir_present = model_service::resolve_model_dir(&base_path).exists();
+
+    Ok(crate::models::CatalogListing {
+        variants,
+        // builtin_catalog は validate_catalog 済みで全て有効なため除外なし。
+        excluded: Vec::new(),
+        model_dir_present,
+    })
 }
 
-/// ローカルモデル読込・セッション保持（`model_service::load_local_model` へ委譲、
-/// 要件 2.4, 15.2）。
-///
-/// [`crate::models::LoadedModel`] は `ort::Session` を保持し serde 不可のため
-/// フロントエンドへは返せない。読込に成功した `LoadedModel` は
-/// [`ModelSessionState::current`] に格納し、以後の推論コマンドから参照可能にする
-/// （要件 2.4）。フロントエンドへは読込成否とメタ情報のみを表す軽量 DTO
-/// [`LoadedModelInfo`]（`input_size`/`label_count`）を返す。この戻り値の形状は
-/// 変更しない（保持 3.4）。
-#[tauri::command]
-pub fn load_local_model(
-    state: tauri::State<'_, ModelSessionState>,
-    dir: String,
-) -> AppResult<LoadedModelInfo> {
-    let loaded = model_service::load_local_model(Path::new(&dir))?;
-    let info = LoadedModelInfo {
-        input_size: loaded.input_size,
-        label_count: loaded.labels.len(),
-    };
-    *state.current.lock().expect("ModelSessionState mutex poisoned") = Some(loaded);
-    Ok(info)
-}
+// 旧 `load_local_model` コマンドはタスク 13.3 で撤去した。新設計では
+// [`start_inference`] が遅延 DL + [`model_service::load_variant`] を内包するため、
+// フロントエンドからの明示ロードコマンドは不要（design「移行方針まとめ」）。
+// `LoadedModelInfo` 型自体は他テスト（`tests/pbt_wiring_preservation.rs`）が
+// 形状を参照するため残す。
 
-/// [`load_local_model`] コマンドが返す serde 可能なモデルメタ情報。
+/// モデルメタ情報の serde 可能な軽量 DTO。
 ///
 /// 実 `ort::Session` を含む [`crate::models::LoadedModel`] は serde 不可のため、
 /// フロントエンドへはこの軽量 DTO を返す。
@@ -268,59 +269,36 @@ pub struct LoadedModelInfo {
     pub label_count: usize,
 }
 
-/// リモートモデルのダウンロード・保存・セッション保持（`model_service::download_model`
-/// へ委譲、要件 15.3, 2.5）。
-///
-/// 実ダウンローダ（`HfHubDownloader`）を用いる。長時間かつネットワークを伴う
-/// 処理のため、アプリ層では別スレッド/タスクで spawn し進捗を通知する想定
-/// （要件 16.8、[`spawn_download_job`] 参照）。保存先ディレクトリのパスを返す
-/// （戻り値の形状は変更しない）。
-///
-/// ダウンロード完了後、保存先ディレクトリを [`model_service::load_local_model`] に
-/// 渡してロードし、[`load_local_model`] コマンドと同じ `ModelSessionState` に
-/// 保持する（要件 2.5）。ロード失敗時はダウンロード自体は成功しているため、
-/// 保存先パスの返却は妨げず、セッション保持のみ行われない。
-#[tauri::command]
-pub fn download_model(
-    state: tauri::State<'_, ModelSessionState>,
-    variant: ModelVariant,
-    dest_dir: String,
-) -> AppResult<String> {
-    let downloader = model_service::HfHubDownloader::new();
-    let saved = model_service::download_model(&downloader, &variant, Path::new(&dest_dir))?;
-
-    if let Ok(loaded) = model_service::load_local_model(&saved) {
-        *state.current.lock().expect("ModelSessionState mutex poisoned") = Some(loaded);
-    }
-
-    Ok(saved.to_string_lossy().into_owned())
-}
-
 // ---------------------------------------------------------------------------
-// モデルダウンロードの spawn・進捗・キャンセル（要件 2.7, 2.8, 2.9、タスク 3.5）
+// モデルダウンロードの spawn・進捗・キャンセル（要件 5.1〜5.5、タスク 13.2）
 // ---------------------------------------------------------------------------
 
-/// [`spawn_model_download_core`] の中核ロジック（`AppHandle` 非依存・単体テスト
+/// [`spawn_variant_download`] の中核ロジック（`AppHandle` 非依存・単体テスト
 /// 可能）。
 ///
-/// [`model_service::download_model_with_progress`]（同期コア・不変）を
-/// [`std::thread::spawn`] 上で実行し、即座に戻る（呼び出し元をブロックしない、
-/// 要件 2.7）。取得段階（onnx 取得 → タグ定義取得 → 保存）ごとに `make_emitter`
-/// が返すエミッタへ進捗を通知する（要件 2.8）。`registry` へ `operation_id` を
-/// 登録して得た共有フラグを取得段の境界で確認し、キャンセル要求があれば
-/// 残りの処理を中断する（要件 2.9）。処理完了（成功・失敗・キャンセル問わず）後、
-/// レジストリ登録を解放する。
+/// [`model_service::download_variant`]（同期コア・不変）を [`std::thread::spawn`]
+/// 上で実行し、即座に戻る（呼び出し元をブロックしない、要件 5.2）。取得段階
+/// （onnx 取得 → タグ定義取得 → 保存）ごとに `make_emitter` が返すエミッタへ
+/// 進捗を通知する（要件 5.3）。`registry` へ `operation_id` を登録して得た共有
+/// フラグを取得段の境界で確認し、キャンセル要求があれば残りの処理を中断する
+/// （要件 5.4）。処理完了（成功・失敗・キャンセル問わず）後、レジストリ登録を
+/// 解放する。
+///
+/// `variant`（`variant_id` からカタログ解決済み）と保存先 `variant_dir` は
+/// 呼び出し側（アプリ層）が [`model_service::builtin_catalog`] /
+/// [`model_service::variant_dir`] を用いて解決する。`variant_dir` を単体テスト
+/// 可能にするため、本コアは `variant`・`variant_dir` を引数で受ける。
 ///
 /// ダウンロード完了後、`on_downloaded`（`Send + 'static`）を呼び保存先ディレクトリ
-/// を渡す。アプリ層ではここで [`model_service::load_local_model`] を呼び
-/// `ModelSessionState` へ格納する（要件 2.5 と同じ経路）。
+/// を渡す。アプリ層ではここで [`model_service::load_variant`] を呼び
+/// `ModelSessionState` へ格納する（要件 5.5 の Model_Present 反映と同じ経路）。
 ///
 /// 戻り値は起動した [`std::thread::JoinHandle`]。呼び出し元は `join` を待たずに
 /// 戻ることで UI スレッドを塞がない。
-fn spawn_model_download_core<D, EM, ODL>(
+fn spawn_variant_download_core<D, EM, ODL>(
     downloader: D,
     variant: ModelVariant,
-    dest_dir: std::path::PathBuf,
+    variant_dir: std::path::PathBuf,
     registry: Arc<CancelRegistry>,
     operation_id: String,
     make_emitter: EM,
@@ -339,7 +317,7 @@ where
         // （onnx 取得 → タグ定義取得 → 保存、design 変更 4）。
         const TOTAL_PHASES: usize = 3;
         let op_id_for_progress = operation_id.clone();
-        let mut on_phase = move |phase: model_service::DownloadPhase| {
+        let on_phase = move |phase: model_service::DownloadPhase| {
             let done = match phase {
                 model_service::DownloadPhase::OnnxFetched => 1,
                 model_service::DownloadPhase::TagDefinitionFetched => 2,
@@ -352,13 +330,8 @@ where
             });
         };
 
-        let result = model_service::download_model_with_progress(
-            &downloader,
-            &variant,
-            &dest_dir,
-            &cancel,
-            &mut on_phase,
-        );
+        let result =
+            model_service::download_variant(&downloader, &variant, &variant_dir, &cancel, on_phase);
 
         registry.clear(&operation_id);
 
@@ -370,43 +343,64 @@ where
     })
 }
 
-/// モデルダウンロードを別スレッドで起動する（要件 2.7, 2.8, 2.9）。
+/// バリアントの明示ダウンロードを別スレッドで起動する（要件 5.1〜5.5）。
 ///
-/// [`spawn_model_download_core`] へ薄く委譲する。呼び出しは即座に戻り
-/// （UI スレッドを塞がない、要件 2.7）、進捗は [`TauriProgressEmitter`] で
+/// [`spawn_variant_download_core`] へ薄く委譲する。呼び出しは即座に戻り
+/// （UI スレッドを塞がない、要件 5.2）、進捗は [`TauriProgressEmitter`] で
 /// `inference://progress`（[`crate::app::PROGRESS_EVENT`]）へ emit する
-/// （要件 2.8）。キャンセルは [`cancel_operation`] コマンド経由の
-/// [`CancelRegistry`] を通じて取得段の境界で反映される（要件 2.9）。
+/// （要件 5.3）。キャンセルは [`cancel_operation`] コマンド経由の
+/// [`CancelRegistry`] を通じて取得段の境界で反映される（要件 5.4）。
 ///
-/// ダウンロード完了後、保存先ディレクトリを [`model_service::load_local_model`]
-/// に渡してロードし、[`load_local_model`]/[`download_model`] コマンドと同じ
-/// `ModelSessionState` に保持する（要件 2.5 と同じ経路）。ロード失敗時は
-/// ダウンロード自体の成否には影響しない（セッション保持のみ行われない）。
+/// `variant_id` を [`model_service::builtin_catalog`] から解決し、
+/// [`model_service::variant_dir`] を保存先に用いる。カタログに存在しない
+/// `variant_id` は [`AppError::not_found`] を返す。
 ///
-/// 既存同期コマンド [`download_model`] は互換のため残し、同期コア
-/// [`model_service::download_model`] の再試行・原子的保存・部分ファイル除去の
-/// 挙動は変更しない（保持 3.2, 3.5）。
+/// ダウンロード完了後、保存先ディレクトリを [`model_service::load_variant`] に
+/// 渡してロードし、同じ `ModelSessionState` に保持する（要件 5.5 の
+/// Model_Present 反映と同じ経路）。ロード失敗時はダウンロード自体の成否には
+/// 影響しない（セッション保持のみ行われない）。
+///
+/// # base_dir について（タスク 14 で確定）
+///
+/// 保存先の基準となる `base_dir` はアプリ層が Tauri の PathResolver
+/// （[`resolve_base_dir`]）から供給する。Download_Operation のデータ書込に
+/// 先立ち [`model_service::ensure_model_dir`] で Model_Dir（`variant_dir` の
+/// 親）を作成する（要件 2.2）。作成失敗（権限不足など）は同期的にエラーを返し、
+/// ダウンロードを開始しない（要件 2.4, 2.5）。
 #[tauri::command]
-pub fn spawn_model_download(
+pub fn spawn_variant_download(
     model_state: tauri::State<'_, ModelSessionState>,
     registry: tauri::State<'_, Arc<CancelRegistry>>,
     app: tauri::AppHandle,
-    variant: ModelVariant,
-    dest_dir: String,
+    variant_id: String,
     operation_id: String,
 ) -> AppResult<()> {
+    // variant_id をカタログから解決する（未知の id は NotFound）。
+    let variant = model_service::builtin_catalog()
+        .into_iter()
+        .find(|v| v.id == variant_id)
+        .ok_or_else(|| {
+            AppError::not_found(format!("カタログに存在しないモデル: {variant_id}"))
+        })?;
+
+    // base_dir を PathResolver から供給する（要件 2.1）。
+    let base_dir = resolve_base_dir(&app);
+    // データ書込前に Model_Dir を作成する（要件 2.2）。作成失敗は開始前に返す。
+    model_service::ensure_model_dir(&model_service::resolve_model_dir(&base_dir))?;
+    let variant_dir = model_service::variant_dir(&base_dir, &variant);
+
     let registry_arc: Arc<CancelRegistry> = Arc::clone(&registry);
     let model_slot = model_state.current_slot();
 
-    spawn_model_download_core(
+    spawn_variant_download_core(
         model_service::HfHubDownloader::new(),
         variant,
-        std::path::PathBuf::from(dest_dir),
+        variant_dir,
         registry_arc,
         operation_id,
         move || -> Box<dyn ProgressEmitter + Send> { Box::new(TauriProgressEmitter::new(app)) },
         move |saved: &Path| {
-            if let Ok(loaded) = model_service::load_local_model(saved) {
+            if let Ok(loaded) = model_service::load_variant(saved) {
                 *model_slot
                     .lock()
                     .expect("ModelSessionState mutex poisoned") = Some(loaded);
@@ -415,6 +409,27 @@ pub fn spawn_model_download(
     );
 
     Ok(())
+}
+
+/// アプリ層の `base_dir` 解決（タスク 14 で確定）。
+///
+/// Tauri v2 の PathResolver（[`tauri::Manager::path`]）から `base_dir` を取得し、
+/// [`model_service::resolve_model_dir`] にはこの実 `base_dir` を渡す
+/// （要件 2.1）。解決できない場合は空パスへフォールバックする。
+///
+/// # `resource_dir` ではなく `app_data_dir` を採用する理由
+///
+/// design は Model_Dir を「インストール基準ディレクトリからの固定相対パス」で
+/// 解決する（要件 2.1）。候補は `resource_dir`（バンドル同梱の読み取り専用に
+/// なり得るディレクトリ）と `app_data_dir`（ユーザーごとの書き込み可能な
+/// アプリデータディレクトリ）だが、Model_Assets は Download_Operation で
+/// 書き込む必要があるため、書き込み可能性を優先して `app_data_dir` を
+/// `base_dir` に採用する。要件 2.1 の「固定相対パス」は、この `base_dir` に
+/// [`model_service::resolve_model_dir`] が固定サブパス（`models`）を結合する
+/// ことで満たす（`base_dir` 自体は環境ごとに一意な絶対パス）。
+fn resolve_base_dir(app: &tauri::AppHandle) -> std::path::PathBuf {
+    use tauri::Manager;
+    app.path().app_data_dir().unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------
@@ -471,8 +486,8 @@ pub fn cancel_operation(
 pub struct InferenceJob {
     /// 対象 Image_File のパス列（mp4 は内部で除外、要件 14.8）。
     pub image_paths: Vec<String>,
-    /// 採用の下限信頼度（0.0〜1.0、要件 14.4）。
-    pub threshold: f32,
+    /// コンパイル済み Tag_Filter（採用/不採用・閾値・出現割合、要件 9, 10）。
+    pub filter: crate::models::TagFilter,
     /// Batch_Size（未指定は既定 8、範囲 1〜64、要件 17.3〜17.5）。
     pub batch_size: Option<u32>,
     /// ラベル定義。
@@ -503,7 +518,7 @@ pub fn run_inference_job(
     job: &InferenceJob,
     registry: &CancelRegistry,
     emitter: &mut dyn ProgressEmitter,
-) -> crate::services::inference_service::InferResult {
+) -> crate::models::InferBatchResult {
     // キャンセルフラグを登録し、共有ハンドルを処理へ渡す（要件 17.7）。
     let cancel = registry.register(&job.operation_id);
 
@@ -512,7 +527,7 @@ pub fn run_inference_job(
     let result = crate::services::inference_service::run_inference(
         runner,
         &job.image_paths,
-        job.threshold,
+        &job.filter,
         job.batch_size,
         &job.labels,
         job.input_size,
@@ -542,7 +557,7 @@ pub fn spawn_inference_job<R>(
     job: InferenceJob,
     registry: Arc<CancelRegistry>,
     mut emitter: Box<dyn ProgressEmitter + Send>,
-) -> std::thread::JoinHandle<crate::services::inference_service::InferResult>
+) -> std::thread::JoinHandle<crate::models::InferBatchResult>
 where
     R: crate::services::inference_service::SessionRunner + Send + 'static,
 {
@@ -572,104 +587,224 @@ struct InferenceRunnerSetup<R> {
 
 /// [`start_inference`] の中核ロジック（`AppHandle` 非依存・単体テスト可能）。
 ///
-/// `take_runner` は「`model_slot`（[`ModelSessionState::current`] と同じ形の
-/// 共有スロット）からロード済みモデルを `take` し、runner を構築して
-/// [`InferenceRunnerSetup`] を返す」処理を表す。セッション未ロードの場合は
-/// `None` を返す。`restore` は推論完了後に runner から取り出した状態を
-/// 呼び出し元スロットへ書き戻す処理を表す。
+/// タスク 13.3 でローカルのみ実行の遅延ダウンロードに対応。runner の準備
+/// （variant_dir の存在判定 → Not_Present なら `download_variant`（遅延 DL）→
+/// `load_variant` → runner 構築）は時間がかかるため、`prepare_runner` として
+/// バックグラウンドスレッド内で実行する。`prepare_runner` は成功すれば
+/// [`InferenceRunnerSetup`] を、Assets 不在・DL 失敗・読込失敗なら `AppError`
+/// （`NotFound`/`Download`/`ModelLoad`）を返す。エラー時は推論を一切実行せず
+/// スレッドを終了する（要件 4.4, 4.5, 7.3, 7.5）。`restore` は推論完了後に
+/// runner から取り出した状態を呼び出し元スロットへ書き戻す処理を表す。
 ///
-/// この 2 つを呼び出し側から注入可能にすることで、既存設計思想（実 ort 実行は
+/// これらを呼び出し側から注入可能にすることで、既存設計思想（実 ort 実行は
 /// [`crate::services::inference_service::SessionRunner`] トレイト境界の背後に
 /// 隔離し、単体テストは `MockRunner` を使う）に合わせ、`start_inference_core`
 /// 自体は実 `ort::Session`／[`crate::models::LoadedModel`] に依存しない。
-/// 本番では `take_runner` の中で `model_slot` から `LoadedModel` を `take` して
-/// [`OwnedOrtRunner::new`] へ渡し、`restore` に [`OwnedOrtRunner::into_inner`]
-/// を渡す（[`start_inference`] 参照）。
+/// 本番では `prepare_runner` の中で is_present 判定・遅延 DL・`load_variant` を
+/// 行い、得た `LoadedModel` を [`OwnedOrtRunner::new`] へ渡し、`restore` に
+/// [`OwnedOrtRunner::into_inner`] を渡す（[`start_inference`] 参照）。
 ///
-/// セッション未ロード（`take_runner` が `None` を返す）の場合は `AppError`
-/// （[`crate::error::AppErrorKind::ModelLoad`]）を返し、クラッシュしない
-/// （要件 2.6）。
+/// `filter`（compile 済み [`crate::models::TagFilter`]）は [`run_inference`] へ
+/// そのまま渡す（要件 7.1）。無効パターン検査・variant 解決の同期的な事前検証は
+/// 呼び出し側（[`start_inference`]）で行い、`InvalidInput`/`NotFound` を同期的に
+/// 返す。本関数はスレッド起動後すぐに戻り、`JoinHandle::join` を待たない
+/// （UI スレッドを塞がない、要件 4.x のローカル実行非阻害）。
+///
+/// [`run_inference`]: crate::services::inference_service::run_inference
 ///
 /// 進捗は `make_emitter`（呼び出しごとに新しい `Box<dyn ProgressEmitter + Send>`
-/// を生成するファクトリ）が返すエミッタへ emit する（要件 2.2）。本関数は
-/// スレッド起動後すぐに戻り、`JoinHandle::join` を待たない（UI スレッドを
-/// 塞がない、要件 2.1）。
+/// を生成するファクトリ）が返すエミッタへ emit する。
 ///
 /// 同期コア（[`run_inference_job`]/[`spawn_inference_job`]/[`InferenceJob`]/
 /// [`crate::services::inference_service::SessionRunner`]/[`OwnedOrtRunner`]）は
 /// 変更しない（保持 3.2）。`AppHandle`/`tauri::State` に依存しないため、実
 /// Tauri ランタイムなしで単体テストできる。
-fn start_inference_core<R, TR, RS, EM>(
+///
+/// `on_complete` は推論完了後に [`crate::models::InferBatchResult`]（`overview`
+/// を含む）を受け取るコールバック（`Send + 'static`）。アプリ層ではここで
+/// [`crate::app::emit_inference_complete`] を呼び、`inference://complete`
+/// イベントで Tag_Overview をフロントエンドへ届ける（要件 11.1、タスク 18.1）。
+/// 準備失敗時（推論を実行しない場合）は呼ばない。
+fn start_inference_core<R, PR, RS, EM, OC>(
     registry: Arc<CancelRegistry>,
-    take_runner: TR,
+    prepare_runner: PR,
     restore: RS,
     make_emitter: EM,
+    on_complete: OC,
     image_paths: Vec<String>,
-    threshold: f32,
+    filter: crate::models::TagFilter,
     batch_size: Option<u32>,
     operation_id: String,
 ) -> AppResult<()>
 where
     R: crate::services::inference_service::SessionRunner + Send + 'static,
-    TR: FnOnce() -> Option<InferenceRunnerSetup<R>>,
+    PR: FnOnce() -> AppResult<InferenceRunnerSetup<R>> + Send + 'static,
     RS: FnOnce(R) + Send + 'static,
     EM: FnOnce() -> Box<dyn ProgressEmitter + Send> + Send + 'static,
+    OC: FnOnce(&crate::models::InferBatchResult) + Send + 'static,
 {
-    // セッション未ロードなら明確な AppError を返す（要件 2.6）。クラッシュしない。
-    let setup = take_runner().ok_or_else(|| AppError::model_load("モデルが選択/ロードされていない"))?;
-
-    let job = InferenceJob {
-        image_paths,
-        threshold,
-        batch_size,
-        labels: setup.labels,
-        input_size: setup.input_size,
-        channel_order: setup.channel_order,
-        operation_id,
-    };
-    let runner = setup.runner;
-
-    // バックグラウンドスレッドで同期コアを実行し、完了後に runner の状態を
-    // 呼び出し元スロットへ書き戻す（次回推論のためセッションを保持し続ける）。
+    // runner の準備（遅延 DL + load）と推論をバックグラウンドスレッドで実行し、
+    // UI スレッドを塞がない。準備が失敗（Assets 不在・DL 失敗・読込失敗）した
+    // 場合は推論を一切実行せずスレッドを終了する（要件 4.4, 4.5, 7.3, 7.5）。
     std::thread::spawn(move || {
+        let setup = match prepare_runner() {
+            Ok(setup) => setup,
+            Err(_err) => {
+                // 準備失敗時は推論しない。エラーの UI 通知経路（error イベント）は
+                // 未配線のため、ここでは推論スキップに留める（Task 17 で UI 通知）。
+                return;
+            }
+        };
+
+        let job = InferenceJob {
+            image_paths,
+            filter,
+            batch_size,
+            labels: setup.labels,
+            input_size: setup.input_size,
+            channel_order: setup.channel_order,
+            operation_id,
+        };
+        let runner = setup.runner;
+
         let mut emitter = make_emitter();
-        let _result = run_inference_job(&runner, &job, &registry, &mut *emitter);
+        let result = run_inference_job(&runner, &job, &registry, &mut *emitter);
+        // 完了後に runner の状態を呼び出し元スロットへ書き戻す
+        // （次回推論のためセッションを保持し続ける）。
         restore(runner);
+        // 完了通知（overview を含む）をフロントエンドへ届ける（要件 11.1）。
+        on_complete(&result);
     });
 
     Ok(())
 }
 
-/// バッチ推論を起動する（要件 2.1, 2.2, 2.3, 2.6）。
+/// バッチ推論をローカルモデルで起動する（要件 4.1〜4.5, 7.1, 7.3, 7.5）。
 ///
-/// [`start_inference_core`] へ薄く委譲する。`model_state`/`registry` は
-/// いずれも内部が `Arc` 共有ハンドル（[`ModelSessionState::current_slot`] /
-/// `Arc<CancelRegistry>` の `State`）のため、複製してバックグラウンドスレッドへ
-/// move できる（`tauri::State<'_, T>` 自体はライフタイム付きで move 不可）。
-/// 進捗は [`TauriProgressEmitter`] で `inference://progress`
-/// （[`crate::app::PROGRESS_EVENT`]）へ emit する。
+/// タスク 13.3 で `variant_id` + `filter`（[`crate::models::RawTagFilter`]）を
+/// 受け、旧 `threshold` を廃した。処理の流れ:
+///
+/// 1. `filter` を [`crate::logic::tag_filter::compile_filter`] でコンパイルする。
+///    無効な正規表現パターンが 1 つでもあれば [`AppError::invalid_input`]
+///    （`InvalidInput`）を同期的に返し、推論は実行しない（要件 9.7、UI に修正を
+///    促す）。無効パターンは適用せず有効分だけで続行する解釈もあるが、tasks.md /
+///    design のコマンド境界記述「無効パターンは `InvalidInput` として UI へ通知」
+///    に従い、ここでは無効パターン検出時に推論を止めて UI へ通知する方針とする。
+/// 2. `variant_id` を [`model_service::builtin_catalog`] から解決する。未知の
+///    `variant_id` は [`AppError::not_found`]（`NotFound`）を同期的に返す。
+/// 3. `variant_dir(base_dir, &variant)` を解決し、以降の遅延 DL + load + 推論を
+///    バックグラウンドスレッド（[`start_inference_core`]）で実行する。スレッド内で:
+///    - `is_present(variant_dir)` が false（Not_Present）なら
+///      [`model_service::download_variant`] で遅延ダウンロードし（進捗通知、
+///      要件 4.1, 4.2）、失敗すれば推論しない（要件 4.4）。DL 成功後
+///      [`model_service::load_variant`] でロードする。
+///    - Present ならそのまま `load_variant` でロードする（要件 4.3）。
+///    - 読込失敗（`ModelLoad`）は推論しない（要件 4.5）。
+///    - ローカルに Assets が無く（Not_Present）DL もできなければ、`download_variant`
+///      が `Download`/`NotFound` を返し推論しない（要件 7.3, 7.5）。
+///    ロードした [`crate::models::LoadedModel`] を [`OwnedOrtRunner`] にして
+///    [`run_inference`] へ `filter`（[`crate::models::TagFilter`]）を渡す
+///    （runner のみを用い Model_Source を参照しない、要件 7.1）。
+///
+/// [`run_inference`]: crate::services::inference_service::run_inference
+///
+/// # base_dir について（タスク 14 で確定）
+///
+/// 保存先/読込元の基準 `base_dir` は本来アプリ層（タスク 14）が Tauri の
+/// PathResolver から供給する。本タスクでは [`resolve_base_dir`]（暫定）を用いる。
+///
+/// `model_state`/`registry` は内部が `Arc` 共有ハンドルのため複製してスレッドへ
+/// move できる。進捗は [`TauriProgressEmitter`] で `inference://progress`
+/// （[`crate::app::PROGRESS_EVENT`]）へ emit する。ロードしたセッションは次回の
+/// 推論のため `model_state` へ保持する。
 #[tauri::command]
 pub fn start_inference(
     model_state: tauri::State<'_, ModelSessionState>,
     registry: tauri::State<'_, Arc<CancelRegistry>>,
     app: tauri::AppHandle,
+    variant_id: String,
+    filter: crate::models::RawTagFilter,
     image_paths: Vec<String>,
-    threshold: f32,
     batch_size: Option<u32>,
     operation_id: String,
 ) -> AppResult<()> {
-    let model_slot = model_state.current_slot();
+    // 1) フィルタをコンパイルする。無効パターンがあれば InvalidInput を同期返却し
+    //    推論しない（要件 9.7）。
+    let (compiled_filter, invalid) = crate::logic::tag_filter::compile_filter(filter);
+    if !invalid.is_empty() {
+        let detail = invalid
+            .iter()
+            .map(|p| format!("{}（{}）", p.pattern, p.reason))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(AppError::invalid_input(format!(
+            "無効な正規表現パターン: {detail}"
+        )));
+    }
+
+    // 2) variant_id をカタログから解決する（未知の id は NotFound）。
+    let variant = model_service::builtin_catalog()
+        .into_iter()
+        .find(|v| v.id == variant_id)
+        .ok_or_else(|| AppError::not_found(format!("カタログに存在しないモデル: {variant_id}")))?;
+
+    // 3) base_dir → variant_dir を解決する（base_dir は PathResolver 供給、要件 2.1）。
+    let base_dir = resolve_base_dir(&app);
+    let model_dir = model_service::resolve_model_dir(&base_dir);
+    let variant_dir = model_service::variant_dir(&base_dir, &variant);
+
     let registry_arc: Arc<CancelRegistry> = Arc::clone(&registry);
+    let model_slot = model_state.current_slot();
     let restore_slot = Arc::clone(&model_slot);
+
+    // 遅延 DL + load を行うエミッタは prepare（DL 進捗）と推論（Progress）で
+    // 共通の TauriProgressEmitter を用いる。prepare 内では on_progress を
+    // DownloadPhase → Progress に写像する。
+    let app_for_dl = app.clone();
+    let op_id_for_dl = operation_id.clone();
+    let registry_for_dl = Arc::clone(&registry);
+    // 完了イベント（overview を含む）の emit 用に AppHandle を複製する
+    // （make_emitter 側で app が move されるため別クローンを持つ、タスク 18.1）。
+    let app_for_complete = app.clone();
 
     start_inference_core(
         registry_arc,
-        move || -> Option<InferenceRunnerSetup<OwnedOrtRunner>> {
-            let model = model_slot
-                .lock()
-                .expect("ModelSessionState mutex poisoned")
-                .take()?;
-            Some(InferenceRunnerSetup {
+        move || -> AppResult<InferenceRunnerSetup<OwnedOrtRunner>> {
+            // Not_Present なら遅延ダウンロード（進捗通知）。失敗すれば推論しない。
+            if !model_service::is_present(&variant_dir) {
+                // データ書込前に Model_Dir を作成する（要件 2.2）。
+                model_service::ensure_model_dir(&model_dir)?;
+                let cancel = registry_for_dl.register(&op_id_for_dl);
+                let mut emitter = TauriProgressEmitter::new(app_for_dl);
+                const TOTAL_PHASES: usize = 3;
+                let op_id = op_id_for_dl.clone();
+                let on_phase = |phase: model_service::DownloadPhase| {
+                    let done = match phase {
+                        model_service::DownloadPhase::OnnxFetched => 1,
+                        model_service::DownloadPhase::TagDefinitionFetched => 2,
+                        model_service::DownloadPhase::Saved => 3,
+                    };
+                    emitter.emit(crate::models::Progress {
+                        operation_id: op_id.clone(),
+                        done,
+                        total: TOTAL_PHASES,
+                    });
+                };
+                let dl = model_service::download_variant(
+                    &model_service::HfHubDownloader::new(),
+                    &variant,
+                    &variant_dir,
+                    &cancel,
+                    on_phase,
+                );
+                registry_for_dl.clear(&op_id_for_dl);
+                dl?;
+            }
+
+            // Present（または DL 成功）なら load_variant でロードする。
+            // 読込失敗（ModelLoad）は推論しない。
+            let model = model_service::load_variant(&variant_dir)?;
+            Ok(InferenceRunnerSetup {
                 labels: model.labels.clone(),
                 input_size: model.input_size,
                 channel_order: model.channel_order,
@@ -677,28 +812,197 @@ pub fn start_inference(
             })
         },
         move |runner: OwnedOrtRunner| {
+            // 次回推論のためロード済みセッションをスロットへ保持する。
             let restored = runner.into_inner();
             *restore_slot
                 .lock()
                 .expect("ModelSessionState mutex poisoned") = Some(restored);
         },
         move || -> Box<dyn ProgressEmitter + Send> { Box::new(TauriProgressEmitter::new(app)) },
+        move |result: &crate::models::InferBatchResult| {
+            // 推論完了後、overview を含む結果を inference://complete へ emit する
+            // （要件 11.1、タスク 18.1）。
+            crate::app::emit_inference_complete(&app_for_complete, result);
+        },
         image_paths,
-        threshold,
+        compiled_filter,
         batch_size,
         operation_id,
     )
+}
+
+// ---------------------------------------------------------------------------
+// Tag_Overview コマンド群（要件 11.3, 11.4, 11.5, 11.6、タスク 13.4）
+// ---------------------------------------------------------------------------
+//
+// 設計判断:「フロントエンド状態保持・コマンドは純粋変換」方針を採る。
+//
+// design のコマンド境界では overview_search / overview_send_keep /
+// overview_send_exclude / rerun_inference が Tag_Overview と Keep_Tags /
+// Exclude_Rules の状態を扱う。ここではこれらを Tauri の `State` として
+// バックエンドで保持せず、現在の `TagOverview` / `RawTagFilter` /
+// 直近バッチの生 Predicted_Tag 列（`Vec<Vec<Tag>>`）はフロントエンドが
+// 保持し、各コマンドは「引数で受けて変換結果を返す」純粋変換として実装する。
+//
+// この方針を採る理由:
+// - `start_inference` はバックグラウンドスレッドで走るため、直近バッチ状態を
+//   Tauri `State` へ書き戻す配線は複雑になり、Task 14 のコマンド登録・
+//   Task 18 のフロント配線とも密結合になる。純粋変換ならこの結合を避けられる。
+// - overview_search / send_keep / send_exclude は本質的に状態を持たない
+//   変換であり、引数で受ける形が最も素直（テストも容易）。
+// - rerun_inference（要件 11.6）は「更新後 filter で同一バッチへ再適用」する
+//   が、これは `apply_filter` → `apply_fraction_threshold` → `build_overview`
+//   の再適用に等しく、生 Predicted_Tag 列と filter があれば純粋に計算できる。
+//
+// 設計上のギャップ（Task 18 / 将来課題で解消）:
+// - rerun_inference の入力 `per_image_predicted`（各画像の生 Predicted_Tag 列）
+//   の供給源が現状ない。`InferBatchResult` は overview しか持たないため、
+//   フロントが生 Tag 列を保持するには `start_inference` の結果に per-image の
+//   生 Tag 列を含める（または別イベントで送る）必要がある。この供給経路は
+//   Task 18（フロント配線）で確定する。本タスクではコマンド自体を純粋変換
+//   として実装・テストし、再適用ロジックの正しさは統合テスト（Task 13.6）で
+//   `apply_filter` → `build_overview` の再適用が正しく動くことを確認する。
+
+/// Tag_Overview を検索文字列で絞り込む（要件 11.3）。
+///
+/// [`crate::logic::tag_batch::search_overview`] へ委譲する純粋変換。大小無視の
+/// 部分一致でタグ名を絞り込み、空クエリは全件を通過させる。現在の `overview` は
+/// フロントエンドが保持し、絞り込み後の `TagOverview` を返す。
+#[tauri::command]
+pub fn overview_search(
+    overview: crate::models::TagOverview,
+    query: String,
+) -> AppResult<crate::models::TagOverview> {
+    Ok(crate::logic::tag_batch::search_overview(&overview, &query))
+}
+
+/// 表示中タグを Keep_Tags へ送る（要件 11.4）。
+///
+/// 現在の `RawTagFilter` の `keep` に `tags` を追加して返す純粋変換。
+/// フロントエンドが保持する `filter` を受け取り、更新後の `filter` を返す。
+/// 既に含まれるタグ名は重複追加しない（正規化キーで比較。`compile_filter` が
+/// トリム＋小文字化するため、`keep` は正規化前の文字列でも整合する）。
+#[tauri::command]
+pub fn overview_send_keep(
+    filter: crate::models::RawTagFilter,
+    tags: Vec<String>,
+) -> AppResult<crate::models::RawTagFilter> {
+    let mut filter = filter;
+    append_unique(&mut filter.keep, tags);
+    Ok(filter)
+}
+
+/// 表示中タグを Exclude_Rules へ送る（要件 11.5）。
+///
+/// 現在の `RawTagFilter` の `exclude` に `tags` を追加して返す純粋変換。
+/// Exclude_Rules は正規表現パターンだが、送出するのは「そのタグ名を除外」する
+/// 意図なので、タグ名をそのまま exclude パターンとして追加する。`compile_filter`
+/// が `^...$` でアンカーするため、追加パターンは当該タグ名の完全一致除外になる。
+///
+/// 正規表現メタ文字を含むタグ名（例 `(cat)`）はパターンとして解釈される点に
+/// 注意。完全一致のエスケープが必要なら Task 18 のフロント側で `regex::escape`
+/// 相当を施して渡す設計余地を残す。ここでは design のコマンド境界に従い、
+/// タグ名をそのままパターンとして追加する。
+#[tauri::command]
+pub fn overview_send_exclude(
+    filter: crate::models::RawTagFilter,
+    tags: Vec<String>,
+) -> AppResult<crate::models::RawTagFilter> {
+    let mut filter = filter;
+    append_unique(&mut filter.exclude, tags);
+    Ok(filter)
+}
+
+/// 更新後フィルタで同一バッチへ推論を再適用し一覧へ反映する（要件 11.6）。
+///
+/// 直近バッチの各画像の生 Predicted_Tag 列 `per_image_predicted` と、更新後の
+/// `filter`（[`crate::models::RawTagFilter`]）を受け、次を再適用して更新後の
+/// [`crate::models::TagOverview`] を返す純粋変換:
+///
+/// 1. [`crate::logic::tag_filter::compile_filter`] で `filter` をコンパイル。
+///    無効な正規表現パターンが 1 つでもあれば [`AppError::invalid_input`]
+///    （`InvalidInput`）を返し、再適用しない（要件 9.7 と同じ扱い、UI へ通知）。
+/// 2. 各画像の生 Predicted_Tag に [`crate::logic::tag_filter::apply_filter`] を
+///    適用して `Vec<FilterOutcome>` を得る。
+/// 3. [`crate::logic::tag_batch::apply_fraction_threshold`]（画像数を渡す）で
+///    Fraction_Threshold を再適用し、[`crate::models::BatchOutcome`] を得る。
+/// 4. その `overview` を返す（`apply_fraction_threshold` が移送後 per_image から
+///    構築済み）。これにより Keep_Tags へ送ったタグが Adopted 側へ移る等、
+///    更新後フィルタの結果が一覧へ反映される。
+#[tauri::command]
+pub fn rerun_inference(
+    per_image_predicted: Vec<Vec<crate::models::Tag>>,
+    filter: crate::models::RawTagFilter,
+) -> AppResult<crate::models::TagOverview> {
+    // (1) フィルタをコンパイル。無効パターンは InvalidInput で通知し再適用しない。
+    let (compiled, invalid) = crate::logic::tag_filter::compile_filter(filter);
+    if !invalid.is_empty() {
+        let detail = invalid
+            .iter()
+            .map(|p| format!("{}（{}）", p.pattern, p.reason))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(AppError::invalid_input(format!(
+            "無効な正規表現パターン: {detail}"
+        )));
+    }
+
+    // (2) 各画像へ apply_filter を再適用する。
+    let per_image: Vec<crate::models::FilterOutcome> = per_image_predicted
+        .iter()
+        .map(|predicted| crate::logic::tag_filter::apply_filter(&compiled, predicted))
+        .collect();
+
+    // (3) Fraction_Threshold を再適用し overview を構築する（要件 11.6）。
+    let image_count = per_image.len();
+    let batch = crate::logic::tag_batch::apply_fraction_threshold(&per_image, &compiled, image_count);
+
+    // (4) 更新後の一覧を返す。
+    Ok(batch.overview)
+}
+
+/// 文字列ベクタへ、既存要素と重複しないものだけを末尾へ追加する。
+///
+/// 重複判定は正規化キー（前後トリム＋小文字化）で行う。追加要素は元の文字列を
+/// そのまま保持する（`compile_filter` 側が正規化するため）。追加順序を保存する。
+fn append_unique(target: &mut Vec<String>, additions: Vec<String>) {
+    let mut seen: std::collections::HashSet<String> = target
+        .iter()
+        .map(|s| s.trim().to_lowercase())
+        .collect();
+    for item in additions {
+        let key = item.trim().to_lowercase();
+        if seen.insert(key) {
+            target.push(item);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::error::AppErrorKind;
-    use crate::models::{ChannelOrder, LabelDef, Progress, TagCategory};
+    use crate::models::{ChannelOrder, LabelDef, Progress, RawTagFilter, TagCategory};
     use crate::services::inference_service::SessionRunner;
     use crate::AppResult as CoreResult;
     use std::path::Path as StdPath;
     use tempfile::tempdir;
+
+    /// Confidence_Threshold のみを設定した TagFilter を作るテストヘルパー。
+    ///
+    /// 旧 `threshold: f32` フィールドと等価な採用挙動を得るため、他フィールドは
+    /// 空、fraction_threshold は 0（非適用）にする。
+    fn threshold_filter(threshold: f32) -> crate::models::TagFilter {
+        let (filter, _invalid) = crate::logic::tag_filter::compile_filter(RawTagFilter {
+            keep: Vec::new(),
+            exclude: Vec::new(),
+            replace: Vec::new(),
+            additional: Vec::new(),
+            confidence_threshold: threshold,
+            fraction_threshold: 0.0,
+        });
+        filter
+    }
 
     // --- 委譲の正しさ（実 Tauri ランタイム不要） ---
 
@@ -825,7 +1129,7 @@ mod tests {
 
         let job = InferenceJob {
             image_paths: paths,
-            threshold: 0.5,
+            filter: threshold_filter(0.5),
             batch_size: Some(1),
             labels: labels(&["a"]),
             input_size: 4,
@@ -883,7 +1187,7 @@ mod tests {
 
         let job = InferenceJob {
             image_paths: paths,
-            threshold: 0.5,
+            filter: threshold_filter(0.5),
             batch_size: Some(1),
             labels: labels(&["a"]),
             input_size: 4,
@@ -911,7 +1215,7 @@ mod tests {
 
         let job = InferenceJob {
             image_paths: vec![p.to_string_lossy().into_owned()],
-            threshold: 0.5,
+            filter: threshold_filter(0.5),
             batch_size: None,
             labels: labels(&["a"]),
             input_size: 4,
@@ -982,7 +1286,7 @@ mod tests {
 
         let job = InferenceJob {
             image_paths: paths,
-            threshold: 0.5,
+            filter: threshold_filter(0.5),
             batch_size: Some(2),
             labels: labels(&["a"]),
             input_size: 4,
@@ -1061,7 +1365,7 @@ mod tests {
         // batch_size を小さくして、キャンセルがバッチ境界で観測される猶予を作る。
         let job = InferenceJob {
             image_paths: paths,
-            threshold: 0.5,
+            filter: threshold_filter(0.5),
             batch_size: Some(1),
             labels: labels(&["a"]),
             input_size: 4,
@@ -1092,32 +1396,60 @@ mod tests {
     // ロード済み時の推論実行・進捗送出・レジストリ解放・状態書き戻し）
     // -----------------------------------------------------------------------
 
-    /// セッション未ロード（`take_runner` が `None` を返す）場合に
-    /// `AppError`（`AppErrorKind::ModelLoad`）を返し、パニックしないことを
-    /// 検証する（要件 2.6）。
+    /// runner の準備（遅延 DL + load）が失敗した場合、推論を一切実行せず
+    /// （`restore` を呼ばず）スレッドが終了することを検証する（要件 4.4, 4.5,
+    /// 7.3, 7.5）。`prepare_runner` は `AppError` を返す。
+    ///
+    /// タスク 13.3 で `start_inference` 自体は即座に `Ok(())` を返し（UI 非阻害）、
+    /// 準備失敗はバックグラウンドスレッド内で推論スキップとして扱う設計に変更。
+    /// エラーの UI 通知経路は未配線のため、ここでは「推論が走らないこと」を
+    /// `restore` 未呼び出しで検証する。
     #[test]
-    fn start_inference_core_returns_model_load_error_when_unloaded() {
+    fn start_inference_core_skips_inference_when_prepare_fails() {
         use crate::commands::progress::RecordingEmitter;
+        use std::sync::mpsc;
+        use std::time::Duration;
 
         let registry = Arc::new(CancelRegistry::new());
+        let (restore_tx, restore_rx) = mpsc::channel::<&'static str>();
+        // prepare 完了（失敗）をテスト側へ合図するチャネル。
+        let (prepared_tx, prepared_rx) = mpsc::channel::<&'static str>();
 
-        let result = start_inference_core::<MockRunner, _, _, _>(
+        let result = start_inference_core::<MockRunner, _, _, _, _>(
             Arc::clone(&registry),
-            || None,
-            |_runner: MockRunner| {
-                panic!("未ロード時は restore が呼ばれてはならない");
+            move || -> AppResult<InferenceRunnerSetup<MockRunner>> {
+                let _ = prepared_tx.send("prepared");
+                Err(AppError::not_found("ローカルに Assets が無い"))
+            },
+            move |_runner: MockRunner| {
+                // 準備失敗時は restore が呼ばれてはならない。
+                let _ = restore_tx.send("restored");
             },
             || -> Box<dyn ProgressEmitter + Send> { Box::new(RecordingEmitter::new()) },
+            |_result: &crate::models::InferBatchResult| {
+                // 準備失敗時は on_complete も呼ばれない（推論が走らないため）。
+            },
             vec!["dummy.png".to_string()],
-            0.5,
+            threshold_filter(0.5),
             None,
-            "unloaded-job".to_string(),
+            "prepare-fail-job".to_string(),
         );
 
-        let err = result.unwrap_err();
-        assert_eq!(err.kind, AppErrorKind::ModelLoad);
-        // 未登録のためレジストリは空のまま。
-        assert!(registry.is_empty());
+        // 起動自体は成功して即座に戻る（UI スレッドを塞がない）。
+        assert!(result.is_ok());
+
+        // prepare が呼ばれ（失敗し）たことを待つ。
+        prepared_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("prepare_runner が時間内に呼ばれなかった");
+
+        // restore は呼ばれない（推論が走っていない）。短い猶予後に未受信を確認。
+        assert!(
+            restore_rx
+                .recv_timeout(Duration::from_millis(300))
+                .is_err(),
+            "準備失敗時に restore が呼ばれた（推論が実行されている）"
+        );
     }
 
     /// ロード済み状態から呼び出すと、`MockRunner` 経由で推論が実行され、
@@ -1153,8 +1485,8 @@ mod tests {
 
         let result = start_inference_core(
             Arc::clone(&registry),
-            move || {
-                Some(InferenceRunnerSetup {
+            move || -> AppResult<InferenceRunnerSetup<MockRunner>> {
+                Ok(InferenceRunnerSetup {
                     labels: setup_labels,
                     input_size: 4,
                     channel_order: ChannelOrder::Bgr,
@@ -1191,8 +1523,11 @@ mod tests {
                     shared: recorded_for_emitter,
                 })
             },
+            |_result: &crate::models::InferBatchResult| {
+                // 完了通知はここでは検証対象外（restore/進捗で完了を確認する）。
+            },
             paths,
-            0.5,
+            threshold_filter(0.5),
             Some(1),
             "loaded-job".to_string(),
         );
@@ -1247,7 +1582,7 @@ mod tests {
 
         let job = InferenceJob {
             image_paths: paths,
-            threshold: 0.5,
+            filter: threshold_filter(0.5),
             batch_size: Some(2),
             labels: labels(&["a"]),
             input_size: 4,
@@ -1282,23 +1617,26 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // タスク 3.5 テスト: spawn_model_download_core（別スレッド即戻り・進捗通知・
-    // キャンセル中断）と model_service::download_model_with_progress（既存
-    // download_model の再試行・原子的保存・部分ファイル除去のリグレッション無し）。
+    // タスク 13.2 テスト: spawn_variant_download_core（別スレッド即戻り・進捗
+    // 通知・キャンセル中断）と model_service::download_variant（再試行・原子的
+    // 保存・部分ファイル除去のリグレッション無し）。
     // -----------------------------------------------------------------------
 
     use crate::services::model_service::{
         self, download_model_tests::MockDownloader, DownloadError,
     };
 
-    /// テスト用のリモート WD14 バリアント。
+    /// テスト用の WD14 バリアント（取得元 `source` を持つ）。
     fn remote_wd14_variant() -> ModelVariant {
         ModelVariant {
             id: "wd14-vit".to_string(),
             display_name: "WD14 ViT".to_string(),
             family: crate::models::ModelFamily::Wd14,
-            location: crate::models::ModelLocation::Remote("owner/wd14-vit".to_string()),
-            onnx_available: true,
+            source: crate::models::ModelSource {
+                repo: "owner/wd14-vit".to_string(),
+                onnx_file: "model.onnx".to_string(),
+                tag_files: vec!["selected_tags.csv".to_string()],
+            },
         }
     }
 
@@ -1310,10 +1648,10 @@ mod tests {
         ])
     }
 
-    /// (要件 2.7) `spawn_model_download_core` が別スレッドで実行され、
+    /// (要件 5.2) `spawn_variant_download_core` が別スレッドで実行され、
     /// 呼び出し元は `join` を待たずに即座に戻ることを検証する。
     #[test]
-    fn spawn_model_download_core_returns_immediately_without_blocking() {
+    fn spawn_variant_download_core_returns_immediately_without_blocking() {
         use crate::commands::progress::RecordingEmitter;
         use std::sync::mpsc;
         use std::time::Duration;
@@ -1352,7 +1690,7 @@ mod tests {
         let (done_tx, done_rx) = mpsc::channel::<()>();
 
         let started = std::time::Instant::now();
-        let handle = spawn_model_download_core(
+        let handle = spawn_variant_download_core(
             downloader,
             remote_wd14_variant(),
             dest.clone(),
@@ -1366,7 +1704,7 @@ mod tests {
         // spawn 呼び出し自体は遅延（150ms x 2 fetch = 300ms 超）より十分速く戻る。
         assert!(
             started.elapsed() < Duration::from_millis(100),
-            "spawn_model_download_core は即座に戻るべき"
+            "spawn_variant_download_core は即座に戻るべき"
         );
 
         // バックグラウンドで完了するまで待つ（テスト側の後始末のため）。
@@ -1376,10 +1714,10 @@ mod tests {
         assert!(registry.is_empty());
     }
 
-    /// (要件 2.8) 取得段階（onnx 取得 → タグ定義取得 → 保存）に応じて進捗が
+    /// (要件 5.3) 取得段階（onnx 取得 → タグ定義取得 → 保存）に応じて進捗が
     /// 段階的に通知されることを検証する。
     #[test]
-    fn spawn_model_download_core_emits_progress_per_phase() {
+    fn spawn_variant_download_core_emits_progress_per_phase() {
         use crate::commands::progress::RecordingEmitter;
         use std::sync::mpsc;
 
@@ -1390,7 +1728,7 @@ mod tests {
 
         let (events_tx, events_rx) = mpsc::channel::<Vec<crate::models::Progress>>();
 
-        let handle = spawn_model_download_core(
+        let handle = spawn_variant_download_core(
             downloader,
             remote_wd14_variant(),
             dest,
@@ -1439,13 +1777,13 @@ mod tests {
         assert!(registry.is_empty());
     }
 
-    /// (要件 2.9) `CancelRegistry` 経由でキャンセル要求すると、取得段の境界で
+    /// (要件 5.4) `CancelRegistry` 経由でキャンセル要求すると、取得段の境界で
     /// 処理が中断されることを検証する。
     ///
     /// onnx 取得完了直後（1 段階目の進捗通知内）でキャンセルを要求し、以降の
     /// タグ定義取得・保存が行われないことを確認する。
     #[test]
-    fn spawn_model_download_core_is_interrupted_by_cancel_registry() {
+    fn spawn_variant_download_core_is_interrupted_by_cancel_registry() {
         use crate::commands::progress::RecordingEmitter;
 
         let downloader = mock_downloader_with_valid_files();
@@ -1454,7 +1792,7 @@ mod tests {
         let registry = Arc::new(CancelRegistry::new());
         let registry_for_cancel = Arc::clone(&registry);
 
-        let handle = spawn_model_download_core(
+        let handle = spawn_variant_download_core(
             downloader,
             remote_wd14_variant(),
             dest.clone(),
@@ -1495,56 +1833,41 @@ mod tests {
         assert!(registry.is_empty());
     }
 
-    /// (保持 3.2, 3.5) `model_service::download_model_with_progress` が
-    /// キャンセルされない通常経路で既存 `download_model` と同じ結果
-    /// （保存先パス・ファイル内容）を返すことを確認する（リグレッション無し）。
+    /// `model_service::download_variant` が通常経路で保存先へ `.onnx`＋タグ定義を
+    /// 確定させ、取得段階（onnx → タグ定義 → 保存）の 3 段階を通知することを
+    /// 確認する（spawn 経路が委譲する同期コアのリグレッション無し）。
     #[test]
-    fn download_model_with_progress_matches_existing_download_model_on_success() {
+    fn download_variant_saves_assets_and_emits_all_phases() {
         use std::sync::atomic::AtomicBool;
 
         let csv = b"tag_id,name,category\n1,solo,0\n";
-        let downloader_a =
-            MockDownloader::with_responses(&[("model.onnx", b"onnx-a"), ("selected_tags.csv", csv)]);
-        let downloader_b =
+        let downloader =
             MockDownloader::with_responses(&[("model.onnx", b"onnx-a"), ("selected_tags.csv", csv)]);
 
         let dir = tempdir().unwrap();
-        let dest_sync = dir.path().join("sync");
-        let dest_progress = dir.path().join("progress");
-
-        let sync_result =
-            model_service::download_model(&downloader_a, &remote_wd14_variant(), &dest_sync)
-                .unwrap();
-
+        let dest = dir.path().join("wd14-vit");
         let cancel = AtomicBool::new(false);
         let mut phases = Vec::new();
-        let progress_result = model_service::download_model_with_progress(
-            &downloader_b,
+
+        let saved = model_service::download_variant(
+            &downloader,
             &remote_wd14_variant(),
-            &dest_progress,
+            &dest,
             &cancel,
             |phase| phases.push(phase),
         )
         .unwrap();
 
-        assert_eq!(sync_result, dest_sync);
-        assert_eq!(progress_result, dest_progress);
-        assert_eq!(
-            std::fs::read(sync_result.join("model.onnx")).unwrap(),
-            std::fs::read(progress_result.join("model.onnx")).unwrap()
-        );
-        assert_eq!(
-            std::fs::read(sync_result.join("selected_tags.csv")).unwrap(),
-            std::fs::read(progress_result.join("selected_tags.csv")).unwrap()
-        );
+        assert_eq!(saved, dest);
+        assert_eq!(std::fs::read(dest.join("model.onnx")).unwrap(), b"onnx-a");
+        assert_eq!(std::fs::read(dest.join("selected_tags.csv")).unwrap(), csv);
         // 3 段階（onnx 取得 → タグ定義取得 → 保存）全てが通知される。
         assert_eq!(phases.len(), 3);
     }
 
-    /// (保持 3.2, 3.5) `download_model_with_progress` も既存の再試行上限
-    /// （最大 3 回）を尊重することを確認する。
+    /// `download_variant` が再試行上限（最大 3 回）を尊重することを確認する。
     #[test]
-    fn download_model_with_progress_preserves_retry_limit() {
+    fn download_variant_preserves_retry_limit() {
         use std::sync::atomic::AtomicBool;
 
         let downloader = MockDownloader::always_failing(DownloadError::Timeout);
@@ -1552,7 +1875,7 @@ mod tests {
         let dest = dir.path().join("wd14-vit");
         let cancel = AtomicBool::new(false);
 
-        let err = model_service::download_model_with_progress(
+        let err = model_service::download_variant(
             &downloader,
             &remote_wd14_variant(),
             &dest,
@@ -1562,15 +1885,14 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(err.kind, AppErrorKind::Download);
-        // 既存 download_model と同じ再試行回数（3 回）。
+        // .onnx の取得だけで最大 3 回まで再試行する。
         assert_eq!(downloader.call_count(), 3);
         assert!(!dest.join("model.onnx").exists());
     }
 
-    /// (保持 3.2, 3.5) 保存失敗時に部分ファイルが残らないこと（既存
-    /// `download_model` と同じ挙動）を確認する。
+    /// 保存失敗時に部分ファイルが残らないことを確認する。
     #[test]
-    fn download_model_with_progress_removes_partial_files_on_save_failure() {
+    fn download_variant_removes_partial_files_on_save_failure() {
         use std::sync::atomic::AtomicBool;
 
         let downloader = mock_downloader_with_valid_files();
@@ -1580,7 +1902,7 @@ mod tests {
         std::fs::write(&dest_as_file, b"i am a file").unwrap();
         let cancel = AtomicBool::new(false);
 
-        let err = model_service::download_model_with_progress(
+        let err = model_service::download_variant(
             &downloader,
             &remote_wd14_variant(),
             &dest_as_file,
@@ -1597,7 +1919,7 @@ mod tests {
     // タスク 4 補完テスト: 起動スモークの一部として、`ModelSessionState` 相当の
     // 共有スロットを介した「一連フロー」統合テスト（要件 2.1, 2.4, 2.5, 2.7）。
     //
-    // 既存テスト（`start_inference_core_*` / `spawn_model_download_core_*`）は
+    // 既存テスト（`start_inference_core_*` / `spawn_variant_download_core_*`）は
     // それぞれの関数を単体で検証するのに対し、本節は複数コマンド境界をまたぐ
     // エンドツーエンドの流れ（モデル選択→推論起動→進捗更新→完了/キャンセル、
     // ダウンロード→保存先ロード→セッション保持→推論参照可能）を 1 本の
@@ -1647,9 +1969,13 @@ mod tests {
         // runner を取り出し、バックグラウンドスレッドで推論を実行する。
         let result = start_inference_core(
             Arc::clone(&registry),
-            move || {
-                let runner = take_slot.lock().unwrap().take()?;
-                Some(InferenceRunnerSetup {
+            move || -> AppResult<InferenceRunnerSetup<MockRunner>> {
+                let runner = take_slot
+                    .lock()
+                    .unwrap()
+                    .take()
+                    .ok_or_else(|| AppError::not_found("スロットにモデルが無い"))?;
+                Ok(InferenceRunnerSetup {
                     labels: setup_labels,
                     input_size: 4,
                     channel_order: ChannelOrder::Bgr,
@@ -1683,8 +2009,9 @@ mod tests {
                     tx: progress_tx,
                 })
             },
+            |_result: &crate::models::InferBatchResult| {},
             paths,
-            0.5,
+            threshold_filter(0.5),
             Some(1),
             "e2e-select-infer".to_string(),
         );
@@ -1755,9 +2082,13 @@ mod tests {
 
         let result = start_inference_core(
             Arc::clone(&registry),
-            move || {
-                let runner = take_slot.lock().unwrap().take()?;
-                Some(InferenceRunnerSetup {
+            move || -> AppResult<InferenceRunnerSetup<MockRunner>> {
+                let runner = take_slot
+                    .lock()
+                    .unwrap()
+                    .take()
+                    .ok_or_else(|| AppError::not_found("スロットにモデルが無い"))?;
+                Ok(InferenceRunnerSetup {
                     labels: setup_labels,
                     input_size: 4,
                     channel_order: ChannelOrder::Bgr,
@@ -1791,8 +2122,9 @@ mod tests {
                     signaled: false,
                 })
             },
+            |_result: &crate::models::InferBatchResult| {},
             paths,
-            0.5,
+            threshold_filter(0.5),
             Some(1),
             operation_id.clone(),
         );
@@ -1819,8 +2151,8 @@ mod tests {
     /// ダウンロード→保存先ロード→セッション保持→推論から参照可能、という
     /// 一連の流れを確認する（要件 2.5, 2.7）。
     ///
-    /// `spawn_model_download_core` の `on_downloaded` コールバック内で
-    /// （本番の `model_service::load_local_model` 相当として）モック
+    /// `spawn_variant_download_core` の `on_downloaded` コールバック内で
+    /// （本番の `model_service::load_variant` 相当として）モック
     /// ローダーを呼び出し、共有スロットへ格納する。その後、同じスロットを
     /// `start_inference_core` の `take_runner` から参照できることを確認し、
     /// 「ダウンロードしたモデルがそのまま推論に使える」結線を検証する。
@@ -1843,7 +2175,7 @@ mod tests {
 
         let (done_tx, done_rx) = mpsc::channel::<()>();
 
-        let handle = spawn_model_download_core(
+        let handle = spawn_variant_download_core(
             downloader,
             remote_wd14_variant(),
             dest.clone(),
@@ -1851,7 +2183,7 @@ mod tests {
             "e2e-download-load".to_string(),
             move || -> Box<dyn ProgressEmitter + Send> { Box::new(RecordingEmitter::new()) },
             move |saved: &Path| {
-                // 「保存先ロード」: 実際は model_service::load_local_model(saved)。
+                // 「保存先ロード」: 実際は model_service::load_variant(saved)。
                 // ここではダウンロードが成功し保存先が存在することを確認し、
                 // 疑似ロード結果（MockRunner）をセッションスロットへ格納する
                 // （セッション保持、要件 2.5）。
@@ -1885,9 +2217,13 @@ mod tests {
 
         let infer_result = start_inference_core(
             registry2,
-            move || {
-                let runner = session_slot.lock().unwrap().take()?;
-                Some(InferenceRunnerSetup {
+            move || -> AppResult<InferenceRunnerSetup<MockRunner>> {
+                let runner = session_slot
+                    .lock()
+                    .unwrap()
+                    .take()
+                    .ok_or_else(|| AppError::not_found("セッションにモデルが無い"))?;
+                Ok(InferenceRunnerSetup {
                     labels: setup_labels,
                     input_size: 4,
                     channel_order: ChannelOrder::Bgr,
@@ -1898,8 +2234,9 @@ mod tests {
                 let _ = restore_tx.send("restored");
             },
             move || -> Box<dyn ProgressEmitter + Send> { Box::new(RecordingEmitter::new()) },
+            |_result: &crate::models::InferBatchResult| {},
             paths,
-            0.5,
+            threshold_filter(0.5),
             None,
             "e2e-download-then-infer".to_string(),
         );

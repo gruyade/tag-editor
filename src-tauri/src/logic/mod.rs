@@ -10,3 +10,5 @@ pub mod naming; // タスク 5: ファイル名正規化・連番・gather/distr
 pub mod sorting; // タスク 6: サイズ振分決定・閾値判定・タグ振分決定
 pub mod path_convert; // タスク 7: Windows/Linux パス変換
 pub mod inference_aux; // タスク 8: 閾値採用・動画除外・Batch_Size 解決・バッチ分割
+pub mod tag_batch; // タスク 7: Fraction_Threshold 適用・Tag_Overview 構築
+pub mod tag_filter; // タスク 6: Tag_Filter コンパイル・単一画像フィルタ適用

@@ -27,6 +27,25 @@ use crate::models::{LoadedModel, Progress};
 /// でこのイベントを購読する（タスク 21.2 のバッチ推論パネルで使用）。
 pub const PROGRESS_EVENT: &str = "inference://progress";
 
+/// バッチ推論完了時に [`crate::models::InferBatchResult`]（`overview` を含む）を
+/// フロントエンドへ送出するイベント名（要件 11.1）。
+///
+/// `start_inference` はバックグラウンドスレッドで推論するため戻り値では
+/// `overview` を返せない。推論完了時にこのイベントで `InferBatchResult` を
+/// emit し、フロントエンドは `window.__TAURI__.event.listen("inference://complete",
+/// ...)` で購読して Tag_Overview を描画する（タスク 18.1）。
+pub const COMPLETE_EVENT: &str = "inference://complete";
+
+/// バッチ推論完了時に `InferBatchResult` をフロントエンドへ送出する。
+///
+/// 送出失敗は握りつぶす（完了通知の欠落は処理そのものを止めない）。
+/// [`crate::commands::adapters::start_inference`] のバックグラウンドスレッドが
+/// 推論完了後にこの関数を呼ぶ経路を注入する。
+pub fn emit_inference_complete(app: &tauri::AppHandle, result: &crate::models::InferBatchResult) {
+    use tauri::Emitter;
+    let _ = app.emit(COMPLETE_EVENT, result);
+}
+
 /// `tauri::AppHandle` を包み、[`ProgressEmitter::emit`] で進捗をフロントエンドへ
 /// 送出するエミッタ（要件 16.7, 17.6）。
 ///
@@ -124,13 +143,17 @@ pub fn run() {
             // CaptionService（要件 11）
             crate::commands::adapters::find_orphan_captions,
             crate::commands::adapters::delete_orphan_captions,
-            // ModelService（要件 15）
-            crate::commands::adapters::list_models,
-            crate::commands::adapters::load_local_model,
-            crate::commands::adapters::download_model,
-            // 推論起動・モデルダウンロード spawn（要件 2.1, 2.7）
+            // ModelService: カタログ一覧・取得状態（要件 1.1, 1.2, 3.1, 3.5）
+            crate::commands::adapters::list_catalog,
+            // バリアント取得の spawn（別スレッド・進捗・キャンセル、要件 5.1〜5.5）
+            crate::commands::adapters::spawn_variant_download,
+            // 推論起動（遅延 DL + load を内包、要件 4.1〜4.5, 7.1）
             crate::commands::adapters::start_inference,
-            crate::commands::adapters::spawn_model_download,
+            // Tag_Overview 変換コマンド群（要件 11.3〜11.6）
+            crate::commands::adapters::overview_search,
+            crate::commands::adapters::overview_send_keep,
+            crate::commands::adapters::overview_send_exclude,
+            crate::commands::adapters::rerun_inference,
             // PlatformService（要件 13, 16.6）
             crate::commands::adapters::capabilities,
             crate::commands::adapters::create_symlink,

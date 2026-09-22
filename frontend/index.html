@@ -79,7 +79,7 @@
         <button class="ops-tab" data-tab="rename" role="tab" type="button">改名/連番/正規化</button>
         <button class="ops-tab" data-tab="orphan" role="tab" type="button">孤立削除</button>
         <button class="ops-tab" data-tab="infer" role="tab" type="button">推論/バッチ</button>
-        <button class="ops-tab" data-tab="model" role="tab" type="button">モデル選択</button>
+        <button class="ops-tab" data-tab="model" role="tab" type="button">モデル管理</button>
         <button class="ops-tab windows-only" data-tab="windows" role="tab" type="button" hidden>Windows限定</button>
       </div>
 
@@ -221,7 +221,7 @@
           </p>
           <div class="field-row">
             <label class="inline-label">
-              閾値
+              確信度閾値
               <input id="infer-threshold" type="range" min="0" max="1" step="0.01" value="0.35" />
               <span id="infer-threshold-value">0.35</span>
             </label>
@@ -234,6 +234,43 @@
               <select id="infer-model" class="text-input"></select>
             </label>
           </div>
+
+          <!-- Tag_Filter 入力（要件 9.1, 9.7）。確信度閾値は上の infer-threshold を
+               confidence_threshold として流用する。keep/exclude/replace/additional と
+               fraction_threshold をここで指定する（タスク 17.1）。 -->
+          <fieldset class="sub tag-filter">
+            <legend>Tag_Filter（推論結果の採用制御）</legend>
+            <div class="filter-grid">
+              <label class="filter-field">
+                <span class="filter-label">Keep_Tags（無条件採用）</span>
+                <textarea id="filter-keep-tags" rows="2"
+                  placeholder="カンマまたは改行区切り。例: 1girl, solo"></textarea>
+              </label>
+              <label class="filter-field">
+                <span class="filter-label">Exclude_Rules（除外パターン / 正規表現）</span>
+                <textarea id="filter-exclude-rules" rows="2"
+                  placeholder="カンマまたは改行区切り。例: watermark, .*signature.*"></textarea>
+              </label>
+              <label class="filter-field">
+                <span class="filter-label">Replace_Rules（検索,置換 を 1 行に 1 対）</span>
+                <textarea id="filter-replace-rules" rows="2"
+                  placeholder="検索,置換 を改行区切りで複数行。例:&#10;girl,woman&#10;.*_bg,background"></textarea>
+              </label>
+              <label class="filter-field">
+                <span class="filter-label">Additional_Tags（無条件付与）</span>
+                <textarea id="filter-additional" rows="2"
+                  placeholder="カンマまたは改行区切り。例: masterpiece, best quality"></textarea>
+              </label>
+            </div>
+            <div class="field-row">
+              <label class="inline-label">
+                Fraction_Threshold（バッチ内出現割合 / 0 で無効）
+                <input id="filter-fraction" type="range" min="0" max="1" step="0.01" value="0" />
+                <span id="filter-fraction-value">0.00</span>
+              </label>
+            </div>
+          </fieldset>
+
           <div class="field-row">
             <button id="infer-run" type="button">推論実行</button>
             <button id="infer-cancel" type="button" class="danger" disabled>キャンセル</button>
@@ -243,20 +280,44 @@
             <span id="infer-progress-text" class="inline-note"></span>
           </div>
           <div id="infer-result" class="op-result" aria-live="polite"></div>
+
+          <!-- Tag_Overview: バッチ後タグ一覧（採用/不採用 2 区分・検索・keep/exclude
+               送出・再推論、要件 11.1〜11.6、タスク 18.1）。バッチ推論完了イベント
+               inference://complete で overview を受け取り JS が描画する。 -->
+          <fieldset class="sub tag-overview" id="overview-panel" hidden>
+            <legend>Tag_Overview（バッチ後タグ一覧）</legend>
+            <div class="field-row overview-toolbar">
+              <label class="inline-label">
+                検索
+                <input id="overview-search" type="text" class="text-input"
+                  placeholder="タグ名の部分一致（大小無視）で絞り込み" />
+              </label>
+              <button id="overview-keep" type="button">表示中を Keep へ送る</button>
+              <button id="overview-exclude" type="button">表示中を Exclude へ送る</button>
+              <button id="overview-rerun" type="button">更新後フィルタで再推論</button>
+            </div>
+            <div class="overview-cols">
+              <div class="overview-col">
+                <h4 class="overview-head">採用タグ <span id="overview-adopted-count" class="inline-note"></span></h4>
+                <div id="overview-adopted" class="overview-list" aria-live="polite"></div>
+              </div>
+              <div class="overview-col">
+                <h4 class="overview-head">不採用タグ <span id="overview-discarded-count" class="inline-note"></span></h4>
+                <div id="overview-discarded" class="overview-list" aria-live="polite"></div>
+              </div>
+            </div>
+            <div id="overview-result" class="op-result" aria-live="polite"></div>
+          </fieldset>
         </div>
 
-        <!-- モデル選択（要件 15.1, 15.5） -->
+        <!-- モデル管理（カタログ一覧・存在状態・ダウンロード、要件 1.1, 1.2, 3.1, 3.5, 5.1, 5.3） -->
         <div class="ops-panel" data-panel="model">
           <div class="field-row">
-            <input id="model-local-dir" type="text" class="text-input" placeholder="ローカルモデルディレクトリ（任意）" />
-            <button id="model-local-pick" type="button" class="ghost">…</button>
             <button id="model-refresh" type="button">一覧更新</button>
+            <span id="model-dir-note" class="inline-note"></span>
           </div>
-          <div class="field-row">
-            <select id="model-list" class="text-input"></select>
-            <button id="model-load-local" type="button">ローカル読込</button>
-            <button id="model-download" type="button">ダウンロード</button>
-          </div>
+          <!-- カタログ各バリアントの行を JS が描画する。 -->
+          <div id="model-catalog" class="model-catalog" aria-live="polite"></div>
           <div id="model-excluded" class="inline-note"></div>
           <div id="model-result" class="op-result" aria-live="polite"></div>
         </div>

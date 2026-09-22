@@ -21,6 +21,8 @@
 //
 // 期待挙動は「まだ存在しない Rust シンボル（start_inference / spawn_model_download /
 // ModelSessionState / OwnedOrtRunner / get_thumbnail_path 等）」に依存する。
+// （spawn_model_download は local-model-management で spawn_variant_download に改名、
+// load_local_model は撤去され start_inference が遅延 DL + load_variant を内包する。）
 // これらを直接参照するとテストが **コンパイル不能** になり、クリーンな FAIL
 // （読める反例）を出せない。そこで本テストは対象ソース
 // （app.rs / adapters.rs / frontend/main.js）と DTO を **ソーステキストとして
@@ -131,8 +133,9 @@ fn counterexample_2_model_session_state_managed() {
     assert!(
         has_session_state,
         "反例2(b): ロード済み LoadedModel を保持する ModelSessionState が存在しない。\
-         load_local_model は LoadedModelInfo だけ返し ort::Session をドロップするため、\
-         推論実行時にセッションを参照する手段が無い（要件 2.4, 2.5）。"
+         local-model-management で load_local_model は撤去され、start_inference（遅延 DL +\
+         load_variant を内包）と spawn_variant_download が load_variant でロードしたモデルを\
+         State へ保持する。その保持先型が無いと推論からセッションを参照できない（要件 2.4, 2.5）。"
     );
 
     // (b-2) app.rs の Builder で manage されている。
@@ -142,14 +145,18 @@ fn counterexample_2_model_session_state_managed() {
          アプリ層 State として推論から参照できない（要件 2.4）。"
     );
 
-    // (b-3) load_local_model がセッションを State に保持する経路を持つ。
-    //   （State<ModelSessionState> を受け取り、格納している）
-    let load_retains_session = adapters.contains("pub fn load_local_model")
-        && adapters.contains("ModelSessionState");
+    // (b-3) load_variant でロードしたモデルを ModelSessionState へ保持する経路を持つ。
+    //   local-model-management で load_local_model は撤去され、start_inference が
+    //   遅延 DL + load_variant を内包してセッション保持を担い、spawn_variant_download も
+    //   完了後 load_variant でロードして同じ ModelSessionState へ格納する。
+    //   したがって「load_variant でロードしたモデルを State へ保持する経路」の存在を検査する。
+    let load_retains_session = adapters.contains("ModelSessionState")
+        && adapters.contains("load_variant")
+        && adapters.contains("pub fn start_inference");
     assert!(
         load_retains_session,
-        "反例2(b): load_local_model が ModelSessionState を受け取りセッションを保持していない。\
-         ロード済みモデルが推論から参照可能にならない（要件 2.4, 2.5）。"
+        "反例2(b): load_variant でロードしたモデルを ModelSessionState へ保持する経路（start_inference /\
+         spawn_variant_download）が無い。ロード済みモデルが推論から参照可能にならない（要件 2.4, 2.5）。"
     );
 }
 
@@ -159,8 +166,9 @@ fn counterexample_2_model_session_state_managed() {
 //   AND (downloadRunsSynchronously OR NOT downloadProgressSubscribed)
 //   （design Bug Condition の (c)）
 //
-// 期待挙動（Property 1 (c)）: spawn_model_download が別スレッドで spawn して
+// 期待挙動（Property 1 (c)）: spawn_variant_download が別スレッドで spawn して
 // 即戻り、進捗をイベント通知し、cancel_operation/CancelRegistry で中断できる。
+// （local-model-management で spawn_model_download は spawn_variant_download に改名。）
 // ===========================================================================
 
 #[test]
@@ -168,24 +176,23 @@ fn counterexample_3_spawn_model_download_defined_and_registered() {
     let adapters = read_tauri_source("src/commands/adapters.rs");
     let app = read_tauri_source("src/app.rs");
 
-    // (c-1) spawn_model_download コマンドが定義されている。
+    // (c-1) spawn_variant_download コマンドが定義されている。
     assert!(
-        adapters.contains("pub fn spawn_model_download"),
-        "反例3(c): spawn_model_download コマンドが adapters.rs に未定義。\
-         download_model は同期でブロックし、別スレッド spawn・進捗通知・\
-         キャンセル配線が無い（要件 2.7, 2.8, 2.9）。"
+        adapters.contains("pub fn spawn_variant_download"),
+        "反例3(c): spawn_variant_download コマンドが adapters.rs に未定義。\
+         別スレッド spawn・進捗通知・キャンセル配線が無い（要件 2.7, 2.8, 2.9）。"
     );
 
     // (c-2) 別スレッドで spawn し、CancelRegistry と連携している。
     assert!(
-        adapters.contains("spawn_model_download") && adapters.contains("CancelRegistry"),
-        "反例3(c): spawn_model_download がキャンセル配線（CancelRegistry）を持たない（要件 2.9）。"
+        adapters.contains("spawn_variant_download") && adapters.contains("CancelRegistry"),
+        "反例3(c): spawn_variant_download がキャンセル配線（CancelRegistry）を持たない（要件 2.9）。"
     );
 
     // (c-3) generate_handler! に登録されている。
     assert!(
-        app.contains("spawn_model_download"),
-        "反例3(c): app.rs の generate_handler! に spawn_model_download が未登録（要件 2.7）。"
+        app.contains("spawn_variant_download"),
+        "反例3(c): app.rs の generate_handler! に spawn_variant_download が未登録（要件 2.7）。"
     );
 }
 
@@ -193,13 +200,13 @@ fn counterexample_3_spawn_model_download_defined_and_registered() {
 fn counterexample_3_frontend_uses_spawn_and_progress() {
     let main_js = read_source("frontend/main.js");
 
-    // ダウンロードは spawn_model_download を進捗購読付きで起動する
-    //（同期 download_model の直接 await ではない）。
+    // ダウンロードは spawn_variant_download を進捗購読付きで起動する
+    //（同期ダウンロードの直接 await ではない）。
     assert!(
-        main_js.contains("invoke(\"spawn_model_download\"")
-            || main_js.contains("invoke('spawn_model_download'"),
-        "反例3(c): frontend/main.js がダウンロードで spawn_model_download を invoke していない。\
-         download_model を直接 await しており進捗・キャンセル未配線（要件 2.7, 2.8, 2.9）。"
+        main_js.contains("invoke(\"spawn_variant_download\"")
+            || main_js.contains("invoke('spawn_variant_download'"),
+        "反例3(c): frontend/main.js がダウンロードで spawn_variant_download を invoke していない。\
+         同期ダウンロードを直接 await しており進捗・キャンセル未配線（要件 2.7, 2.8, 2.9）。"
     );
 }
 
