@@ -22,10 +22,7 @@ pub const MAX_BATCH_SIZE: u32 = 64;
 /// 拡張子の判定は大文字小文字を区別しない（`.mp4` / `.MP4` / `.Mp4` すべて真）。
 fn is_mp4(path: &str) -> bool {
     // 最後の '.' 以降を拡張子として取り出す。区切り文字は '/' と '\\' の双方を考慮。
-    let file_name = path
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or(path);
+    let file_name = path.rsplit(['/', '\\']).next().unwrap_or(path);
     match file_name.rsplit_once('.') {
         Some((_, ext)) => ext.eq_ignore_ascii_case("mp4"),
         None => false,
