@@ -29,6 +29,7 @@
 //!     占有するため、ユニット/統合テストからは呼び出さない。
 //!   - 手動確認手順は本ファイル末尾のコメント「手動スモーク手順」を参照。
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -38,6 +39,127 @@ use tag_editor_core::commands::progress::{ProgressEmitter, RecordingEmitter};
 use tag_editor_core::models::{ChannelOrder, LabelDef, Progress, TagCategory};
 use tag_editor_core::services::inference_service::SessionRunner;
 use tag_editor_core::AppResult;
+
+/// confidence_threshold のみ設定した TagFilter を作る（旧 `threshold: f32` 相当）。
+fn threshold_filter(threshold: f32) -> tag_editor_core::models::TagFilter {
+    let (filter, _invalid) =
+        tag_editor_core::logic::tag_filter::compile_filter(tag_editor_core::models::RawTagFilter {
+            keep: Vec::new(),
+            exclude: Vec::new(),
+            replace: Vec::new(),
+            additional: Vec::new(),
+            confidence_threshold: threshold,
+            fraction_threshold: 0.0,
+        });
+    filter
+}
+
+// ---------------------------------------------------------------------------
+// 新コマンド登録・State 管理の確認（タスク 4、要件 2.1, 2.4, 2.5, 2.7）
+// ---------------------------------------------------------------------------
+//
+// `start_inference`/`spawn_model_download`/`ModelSessionState` は、実引数に
+// `tauri::State`/`tauri::AppHandle` を取るため `tauri::Builder::run` を経ない
+// 単体呼び出しができない。かつ `app::run` を直接呼ぶと実ウィンドウ起動が
+// 必要になり、本ファイル冒頭のコメントで説明した通り WebView ランタイムへの
+// 依存でスモークの決定性を損なう。
+//
+// そこで、既存の `pbt_inference_model_wiring_bug_condition.rs` と同じ手法
+// （対象ソースをテキストとして観測し、結線の有無を実行時アサーションで判定
+// する）を用いて、`generate_handler!` への新コマンド登録と `ModelSessionState`
+// の `manage` を検査する。これにより実ウィンドウ・実 WebView 無しで「新コマンド
+// がアプリに配線されている」ことを決定的に確認できる。
+//
+// なお、この検査ロジック自体は `pbt_inference_model_wiring_bug_condition.rs`
+// の反例テスト（未修正コードで FAIL することを確認する探索テスト）と同一
+// テストではない。あちらは「バグが直った」ことを示す反例チェックであり、
+// 本テストは「起動スモークの一部として配線が現在も健全である」ことを示す
+// リグレッション防止のためのものである。
+
+/// `src-tauri` ディレクトリ（`CARGO_MANIFEST_DIR`）。
+fn src_tauri_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+/// `src-tauri/src/...` 配下のソースをテキストとして読む。
+fn read_tauri_source(rel_from_src_tauri: &str) -> String {
+    let path = src_tauri_dir().join(rel_from_src_tauri);
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("ソース読込に失敗: {} ({e})", path.display()))
+}
+
+/// (要件 2.1, 2.7) `generate_handler!` に `start_inference`/
+/// `spawn_model_download`/`get_thumbnail_path`/`get_preview_path` が
+/// 登録されていることを確認する。
+///
+/// 起動スモークの一部として、アプリがこれらのコマンドを実際に `invoke`
+/// 可能な状態でビルドされることをソーステキスト検査で担保する
+/// （実ウィンドウなしで検査可能な範囲）。
+#[test]
+fn app_registers_new_inference_and_model_commands_in_generate_handler() {
+    let app = read_tauri_source("src/app.rs");
+
+    // generate_handler! マクロ呼び出しの本体だけを抜き出す。マクロ外の
+    // コメント等に文字列が出現しても誤検知しないようにする。
+    let handler_body = generate_handler_body(&app);
+
+    for expected in [
+        "start_inference",
+        "spawn_model_download",
+        "get_thumbnail_path",
+        "get_preview_path",
+    ] {
+        assert!(
+            handler_body.contains(expected),
+            "generate_handler! に {expected} が登録されていない: {handler_body}"
+        );
+    }
+}
+
+/// (要件 2.4) `ModelSessionState` が `tauri::Builder` で `manage` されている
+/// ことを確認する。
+#[test]
+fn app_manages_model_session_state() {
+    let app = read_tauri_source("src/app.rs");
+    assert!(
+        app.contains(".manage(ModelSessionState::default())")
+            || (app.contains(".manage(") && app.contains("ModelSessionState")),
+        "app.rs で ModelSessionState が manage されていない"
+    );
+}
+
+/// `tauri::generate_handler![...]` マクロ呼び出しの `[...]` 内側テキストを
+/// 抜き出す。マクロが見つからない場合は panic する（配線検査の前提が崩れる
+/// ため、テストを黙って skip しない）。
+fn generate_handler_body(source: &str) -> String {
+    let marker = "tauri::generate_handler![";
+    let start = source
+        .find(marker)
+        .unwrap_or_else(|| panic!("app.rs に {marker} が見つからない"))
+        + marker.len();
+    let rest = &source[start..];
+    let end = rest
+        .find(']')
+        .unwrap_or_else(|| panic!("generate_handler! の閉じ ] が見つからない"));
+    rest[..end].to_string()
+}
+
+/// (要件 2.1〜2.7) `cargo build --bin tag-editor` がネイティブバイナリを
+/// 完全にビルド・リンクできることを、本ファイル冒頭のコメント通りの方針で
+/// 別途 `cargo build --bin tag-editor` によって担保する。ここでは、その方針
+/// を裏付けるため `src-tauri/src/main.rs` がビルド対象のバイナリ入口として
+/// `tag_editor_core::run`（すなわち `app::run`）を呼び出す配線を持つことだけを
+/// ソーステキストで確認する（本テスト自体は WebView に依存しない）。
+#[test]
+fn main_bin_entry_wires_to_app_run() {
+    let main_rs_path = src_tauri_dir().join("src/main.rs");
+    let main_rs = std::fs::read_to_string(&main_rs_path)
+        .unwrap_or_else(|e| panic!("ソース読込に失敗: {} ({e})", main_rs_path.display()));
+    assert!(
+        main_rs.contains("run()"),
+        "main.rs が tag_editor_core::run（app::run）を呼び出していない"
+    );
+}
 
 // ---------------------------------------------------------------------------
 // 配線の健全性（実ウィンドウ不要な実行時確認）
@@ -120,7 +242,7 @@ fn long_running_job_spawns_without_blocking_caller() {
 
     let job = InferenceJob {
         image_paths: paths,
-        threshold: 0.5,
+        filter: threshold_filter(0.5),
         batch_size: Some(1),
         labels: labels(&["a"]),
         input_size: 4,
@@ -210,7 +332,7 @@ fn long_running_job_honors_cancel_from_ui_thread() {
 
     let job = InferenceJob {
         image_paths: paths,
-        threshold: 0.5,
+        filter: threshold_filter(0.5),
         batch_size: Some(1),
         labels: labels(&["a"]),
         input_size: 4,
@@ -224,7 +346,10 @@ fn long_running_job_honors_cancel_from_ui_thread() {
     // ジョブが動き出したら、UI スレッド相当の本スレッドからキャンセルを要求する。
     let _ = rx.recv();
     let requested = registry.request_cancel("smoke-cancel");
-    assert!(requested, "実行中ジョブへのキャンセル要求が登録に届いていない");
+    assert!(
+        requested,
+        "実行中ジョブへのキャンセル要求が登録に届いていない"
+    );
 
     let result = handle.join().expect("推論スレッドが panic した");
 

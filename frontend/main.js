@@ -12,7 +12,7 @@
 // - 画像なし / フォルダ読取不可のメッセージ表示（要件 1.7, 1.8）
 // - 保存成功 / 失敗表示（要件 2.5）
 
-const { invoke } = window.__TAURI__.core;
+const { invoke, convertFileSrc } = window.__TAURI__.core;
 const dialog = window.__TAURI__.dialog;
 // 進捗イベント購読に使用（推論/バッチパネル、要件 16.7, 17.6）。
 const tauriEvent = window.__TAURI__.event;
@@ -49,10 +49,28 @@ const state = {
   // 進行中の推論 operation_id とイベント購読解除関数（キャンセル用）。
   inferOperationId: null,
   inferUnlisten: null,
-  // 検出済みモデル一覧（download_model へ渡す ModelVariant を保持）。
-  models: { available: [], excluded: [] },
+  // カタログ一覧（list_catalog の CatalogListing を保持）。
+  // variants: VariantPresence[]（{ variant: ModelVariant, present: bool }）
+  // excluded: ModelVariant[]（必須フィールド欠落で除外、要件 1.4）
+  // model_dir_present: Model_Dir が存在するか（要件 3.5）
+  models: { variants: [], excluded: [], model_dir_present: false },
+  // 進行中のバリアントダウンロード operation_id（variant_id をキーに保持）。
+  downloadOps: {},
   // 検出済み孤立キャプションのパス一覧（承認削除用）。
   orphans: [],
+  // 直近バッチ推論の Tag_Overview（inference://complete で受信、要件 11.1）。
+  // { adopted: TagStat[], discarded: TagStat[] } または null。
+  overview: null,
+  // Tag_Overview の検索絞り込み後の表示（overview_search の戻り、要件 11.3）。
+  // null なら overview を全件表示する。
+  overviewFiltered: null,
+  // Tag_Overview で選択中のタグ名の集合（クリックでトグル）。keep/exclude 送出は
+  // 表示中ではなく「選択中」のタグを対象にする（要件 11.4, 11.5）。
+  overviewSelected: new Set(),
+  // 直近バッチ推論の対象 Image_File パス列（再推論で同一バッチへ再適用、要件 11.6）。
+  lastInferTargets: [],
+  // 直近バッチ推論の completion イベント購読解除関数。
+  completeUnlisten: null,
 };
 
 // ---- ユーティリティ ----
@@ -220,16 +238,20 @@ function renderGrid() {
   }
 }
 
-/** 単一サムネイルを取得して差し込む。失敗時は代替表示のまま残す（要件 1.6）。 */
+/**
+ * 単一サムネイルを取得して差し込む。失敗時は代替表示のまま残す（要件 1.6）。
+ * サムネイルは軽量転送経路（要件 2.10, 2.11, 2.12）を用い、Rust 側がキャッシュへ
+ * 書き出したファイルパスを `convertFileSrc`（asset protocol）経由で `<img src>`
+ * に直接割り当てる（JSON 数値配列・手動 Base64 化は経ない）。
+ */
 async function loadThumbnail(path, cell, size) {
   try {
-    const thumb = await invoke("get_thumbnail", { path, size });
-    const url = thumb.placeholder ? null : pngBytesToDataUrl(thumb.png);
+    const result = await invoke("get_thumbnail_path", { path, size });
     const holder = cell.querySelector(".placeholder, img");
     if (!holder) return;
-    if (url) {
+    if (!result.placeholder) {
       const img = document.createElement("img");
-      img.src = url;
+      img.src = convertFileSrc(result.path);
       img.alt = "";
       holder.replaceWith(img);
     } else {
@@ -263,16 +285,19 @@ async function selectImage(path, cell) {
   loadTags(path);
 }
 
-/** 拡大プレビューを取得して表示する（要件 1.5）。 */
+/**
+ * 拡大プレビューを取得して表示する（要件 1.5）。
+ * 軽量転送経路（要件 2.10, 2.11, 2.12）を用い、`convertFileSrc` でファイル
+ * パスを直接 `<img src>` に割り当てる（JSON 数値配列・手動 Base64 化は経ない）。
+ */
 async function loadPreview(path) {
   els.preview.classList.remove("show");
   els.previewEmpty.textContent = "プレビューを読み込み中…";
   els.previewEmpty.style.display = "block";
   try {
-    const preview = await invoke("get_preview", { path });
-    const url = preview.placeholder ? null : pngBytesToDataUrl(preview.png);
-    if (url) {
-      els.preview.src = url;
+    const result = await invoke("get_preview_path", { path });
+    if (!result.placeholder) {
+      els.preview.src = convertFileSrc(result.path);
       els.preview.classList.add("show");
       els.previewEmpty.style.display = "none";
     } else {
@@ -464,6 +489,14 @@ const ops = {
   // 推論/バッチ
   inferThreshold: document.getElementById("infer-threshold"),
   inferThresholdValue: document.getElementById("infer-threshold-value"),
+  // Tag_Filter 入力（タスク 17.1、要件 9.1/9.7）。confidence_threshold は
+  // inferThreshold を流用するため専用要素は持たない。
+  filterKeepTags: document.getElementById("filter-keep-tags"),
+  filterExcludeRules: document.getElementById("filter-exclude-rules"),
+  filterReplaceRules: document.getElementById("filter-replace-rules"),
+  filterAdditional: document.getElementById("filter-additional"),
+  filterFraction: document.getElementById("filter-fraction"),
+  filterFractionValue: document.getElementById("filter-fraction-value"),
   inferBatch: document.getElementById("infer-batch"),
   inferModel: document.getElementById("infer-model"),
   inferRun: document.getElementById("infer-run"),
@@ -473,13 +506,25 @@ const ops = {
   inferResult: document.getElementById("infer-result"),
   inferTargetHint: document.getElementById("infer-target-hint"),
 
-  // モデル選択
-  modelLocalDir: document.getElementById("model-local-dir"),
-  modelLocalPick: document.getElementById("model-local-pick"),
+  // Tag_Overview（バッチ後タグ一覧、要件 11.1〜11.6、タスク 18.1）
+  overviewPanel: document.getElementById("overview-panel"),
+  overviewSearch: document.getElementById("overview-search"),
+  overviewKeep: document.getElementById("overview-keep"),
+  overviewExclude: document.getElementById("overview-exclude"),
+  overviewReplace: document.getElementById("overview-replace"),
+  overviewRerun: document.getElementById("overview-rerun"),
+  overviewAdopted: document.getElementById("overview-adopted"),
+  overviewDiscarded: document.getElementById("overview-discarded"),
+  overviewAdoptedCount: document.getElementById("overview-adopted-count"),
+  overviewDiscardedCount: document.getElementById("overview-discarded-count"),
+  overviewSelectedCount: document.getElementById("overview-selected-count"),
+  overviewResult: document.getElementById("overview-result"),
+
+  // モデル管理（カタログ一覧・存在状態・DL）
   modelRefresh: document.getElementById("model-refresh"),
-  modelList: document.getElementById("model-list"),
-  modelLoadLocal: document.getElementById("model-load-local"),
-  modelDownload: document.getElementById("model-download"),
+  modelDirNote: document.getElementById("model-dir-note"),
+  modelDirPath: document.getElementById("model-dir-path"),
+  modelCatalog: document.getElementById("model-catalog"),
   modelExcluded: document.getElementById("model-excluded"),
   modelResult: document.getElementById("model-result"),
 
@@ -553,14 +598,11 @@ async function pickFolderInto(input) {
 
 /**
  * 一括操作/推論の対象 Image_File パス列を返す（要件 3.1 の対象選択）。
- * targetName は radio group 名。"selected" が選ばれていれば選択集合、
- * それ以外は一覧の全画像を対象にする。
+ * 選択モード ON なら選択中の画像のみ、OFF なら一覧の全画像を対象にする
+ * （対象ラジオボタンは廃止し、画面上部の選択モードの状態から自動的に決まる）。
  */
-function resolveTargets(targetName) {
-  const mode = document.querySelector(
-    `input[name="${targetName}"]:checked`
-  );
-  if (mode && mode.value === "selected") {
+function resolveTargets() {
+  if (state.selectMode) {
     // 選択集合のうち、現在の一覧に含まれるものだけを対象にする。
     const listed = new Set(state.items.map((i) => i.path));
     return [...state.picked].filter((p) => listed.has(p));
@@ -575,11 +617,12 @@ function updateSelectCount() {
   const hasItems = state.items.length > 0;
   ops.selectAll.disabled = !hasItems || !state.selectMode;
   ops.selectNone.disabled = n === 0;
-  const hint = state.selectMode
-    ? `（選択 ${n} 件 / 一覧 ${state.items.length} 件）`
-    : "（選択モードOFF: 一覧全件が対象）";
-  if (ops.bulkTargetHint) ops.bulkTargetHint.textContent = hint;
-  if (ops.inferTargetHint) ops.inferTargetHint.textContent = hint;
+  // 一括操作/推論の対象は選択モードの状態が自動的に決める（ラジオボタンは廃止）。
+  const targetHint = state.selectMode
+    ? `選択モード中: 選択した ${n} 件が対象`
+    : `選択モードOFF: 一覧全件（${state.items.length} 件）が対象`;
+  if (ops.bulkTargetHint) ops.bulkTargetHint.textContent = targetHint;
+  if (ops.inferTargetHint) ops.inferTargetHint.textContent = targetHint;
 }
 
 // ---- 選択モード ----
@@ -630,9 +673,14 @@ for (const tab of document.querySelectorAll(".ops-tab")) {
 // ---- 一括操作（要件 3.1, 3.3, 3.4） ----
 
 async function runBulk(command, needTags) {
-  const targets = resolveTargets("bulk-target");
+  const targets = resolveTargets();
   if (targets.length === 0) {
-    renderText(ops.bulkResult, "対象の画像がありません（フォルダ未選択または選択0件）");
+    renderText(
+      ops.bulkResult,
+      state.selectMode
+        ? "対象の画像がありません（選択モード中は選択した画像が対象。0件選択中）"
+        : "対象の画像がありません（フォルダ未選択）"
+    );
     return;
   }
   const args = { targets };
@@ -932,22 +980,66 @@ ops.orphanDelete.addEventListener("click", async () => {
 
 // ---- 推論/バッチ（進捗・キャンセル・閾値・Batch_Size、要件 16.7, 17.6, 17.7） ----
 //
-// 注意（TODO / 設計上の制約）:
-//   現状の Rust 側には run_inference を直接呼ぶ #[tauri::command] アダプタが
-//   存在しない（バッチ推論はアプリ層の spawn_inference_job 経由で起動される
-//   設計、src-tauri/src/commands/adapters.rs 参照）。そのため本パネルの実行
-//   ボタンからは invoke("run_inference") を呼べない。ここでは要件に沿って
-//   以下を配線する:
-//     - 進捗イベント `inference://progress` の購読（done/total 表示、要件 16.7, 17.6）
-//     - キャンセルボタン → cancel_operation コマンド（要件 17.7）
-//     - 閾値スライダ・Batch_Size・モデル選択の UI（採用値の受け渡し準備）
-//   実際のバッチ実行トリガ（run_inference の起動）はアプリ層の spawn に委ねる
-//   （Rust は変更しない）。アプリ層が operation_id を払い出したら、その値を
-//   本 UI へ渡すことで進捗購読とキャンセルが機能する。
+// バッチ推論の起動は #[tauri::command] start_inference（src-tauri/src/commands/
+// adapters.rs）へ委譲する。operation_id 発行・進捗購読開始の後に invoke で
+// start_inference を呼び、Rust 側がバックグラウンドスレッドで spawn_inference_job
+// を起動する（要件 2.1, 2.2, 2.3）。セッション未ロードなど呼び出し自体が失敗
+// した場合は renderError で表示し、ボタン活性化/購読解除を行う（要件 2.6）。
 
 ops.inferThreshold.addEventListener("input", () => {
   ops.inferThresholdValue.textContent = Number(ops.inferThreshold.value).toFixed(2);
 });
+
+ops.filterFraction.addEventListener("input", () => {
+  ops.filterFractionValue.textContent = Number(ops.filterFraction.value).toFixed(2);
+});
+
+/**
+ * カンマまたは改行区切りの入力を、トリム済み・空要素除去した文字列配列へ変換する
+ * （keep/exclude/additional の共通パーサ）。
+ */
+function parseCommaOrNewlineList(raw) {
+  return (raw || "")
+    .split(/[,\n]/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
+ * Replace_Rules 入力（1 行 1 対「検索,置換」）を [検索, 置換][] へパースする。
+ * 検索が空の行は無視する。置換は空文字を許容する（タグ削除的な置換）。
+ * 検索側に「,」を含めたい用途は想定せず、最初の「,」で検索/置換に分割する。
+ */
+function parseReplaceRules(raw) {
+  const rules = [];
+  for (const line of (raw || "").split(/\n/)) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) continue;
+    const idx = trimmed.indexOf(",");
+    if (idx < 0) continue; // 「検索,置換」形式でない行は無視。
+    const search = trimmed.slice(0, idx).trim();
+    const replacement = trimmed.slice(idx + 1).trim();
+    if (search.length === 0) continue;
+    rules.push([search, replacement]);
+  }
+  return rules;
+}
+
+/**
+ * Tag_Filter 入力要素から RawTagFilter DTO を組み立てる（要件 9.1）。
+ * confidence_threshold は推論の閾値スライダを流用し、fraction_threshold は
+ * 専用スライダの値（0 で非適用、要件 10.3）を用いる。
+ */
+function buildRawTagFilter() {
+  return {
+    keep: parseCommaOrNewlineList(ops.filterKeepTags.value),
+    exclude: parseCommaOrNewlineList(ops.filterExcludeRules.value),
+    replace: parseReplaceRules(ops.filterReplaceRules.value),
+    additional: parseCommaOrNewlineList(ops.filterAdditional.value),
+    confidence_threshold: Number(ops.inferThreshold.value),
+    fraction_threshold: Number(ops.filterFraction.value),
+  };
+}
 
 /** 進捗イベント購読を開始する。既存購読があれば解除してから張り直す。 */
 async function startProgressSubscription() {
@@ -990,6 +1082,52 @@ async function stopProgressSubscription() {
   }
 }
 
+/**
+ * バッチ推論完了イベント（inference://complete）購読を開始する（要件 11.1）。
+ * Rust の start_inference はバックグラウンドスレッドで推論するため戻り値では
+ * overview を返せない。完了時に InferBatchResult（overview を含む）を emit する
+ * ので、それを購読して Tag_Overview を描画する（タスク 18.1）。
+ * 既存購読があれば解除してから張り直す。
+ */
+async function startCompleteSubscription() {
+  await stopCompleteSubscription();
+  try {
+    state.completeUnlisten = await tauriEvent.listen(
+      "inference://complete",
+      (evt) => {
+        const result = evt.payload || {};
+        // overview を state に保持して 2 区分描画する（要件 11.1, 11.2）。
+        state.overview = result.overview || { adopted: [], discarded: [] };
+        state.overviewFiltered = null;
+        // 検索ボックスと選択は新バッチで一旦クリアする。
+        ops.overviewSearch.value = "";
+        state.overviewSelected.clear();
+        renderOverview();
+        ops.overviewPanel.hidden = false;
+        renderText(
+          ops.overviewResult,
+          `一覧を更新（採用 ${state.overview.adopted.length} / 不採用 ${state.overview.discarded.length}）`,
+          true
+        );
+      }
+    );
+  } catch (err) {
+    renderError(ops.inferResult, err);
+  }
+}
+
+/** バッチ推論完了イベント購読を解除する。 */
+async function stopCompleteSubscription() {
+  if (state.completeUnlisten) {
+    try {
+      state.completeUnlisten();
+    } catch {
+      /* 解除失敗は無視 */
+    }
+    state.completeUnlisten = null;
+  }
+}
+
 /** 推論の後片付け（ボタン活性・購読解除）。 */
 function finishInference() {
   ops.inferRun.disabled = false;
@@ -999,9 +1137,14 @@ function finishInference() {
 }
 
 ops.inferRun.addEventListener("click", async () => {
-  const targets = resolveTargets("infer-target");
+  const targets = resolveTargets();
   if (targets.length === 0) {
-    renderText(ops.inferResult, "対象の画像がありません（フォルダ未選択または選択0件）");
+    renderText(
+      ops.inferResult,
+      state.selectMode
+        ? "対象の画像がありません（選択モード中は選択した画像が対象。0件選択中）"
+        : "対象の画像がありません（フォルダ未選択）"
+    );
     return;
   }
   const threshold = Number(ops.inferThreshold.value);
@@ -1013,26 +1156,48 @@ ops.inferRun.addEventListener("click", async () => {
   }
   const modelId = ops.inferModel.value;
   if (!modelId) {
-    renderText(ops.inferResult, "先にモデルを選択してください（モデル選択タブ）");
+    renderText(ops.inferResult, "先にモデルを選択してください（モデル管理タブ）");
     return;
   }
 
-  // operation_id を払い出し、進捗購読とキャンセルを配線する。
-  // 実バッチ実行の起動はアプリ層の spawn（run_inference）に委ねる（Rust 未変更）。
+  // operation_id を払い出し、進捗購読とキャンセルを配線した後に実推論を起動する。
   state.inferOperationId = "infer-" + Date.now();
+  // 再推論（要件 11.6）のため、対象バッチを保持する。
+  state.lastInferTargets = targets.slice();
   ops.inferRun.disabled = true;
   ops.inferCancel.disabled = false;
   await startProgressSubscription();
+  // 完了イベント（overview）購読を開始する（要件 11.1）。
+  await startCompleteSubscription();
 
   renderText(
     ops.inferResult,
     `推論を要求（対象 ${targets.length} 件, 閾値 ${threshold.toFixed(2)}` +
       (batchSize !== null ? `, Batch_Size ${batchSize}` : "") +
-      `, モデル ${modelId}）。進捗イベントを購読中。` +
-      "\n※ 実バッチ実行トリガはアプリ層の spawn が起動します（operation_id=" +
-      state.inferOperationId +
-      "）。"
+      `, モデル ${modelId}）。進捗イベントを購読中。`
   );
+
+  // Rust の start_inference は variant_id + filter（RawTagFilter）を取る
+  // （旧 threshold は廃止）。Tag_Filter 入力 UI（keep/exclude/replace/additional/
+  // confidence_threshold/fraction_threshold）から RawTagFilter を組み立てる
+  // （タスク 17.1、要件 9.1）。confidence_threshold は閾値スライダを流用する。
+  const filter = buildRawTagFilter();
+
+  try {
+    await invoke("start_inference", {
+      variantId: modelId,
+      filter,
+      imagePaths: targets,
+      batchSize,
+      operationId: state.inferOperationId,
+    });
+  } catch (err) {
+    // モデル未ロード、または無効な正規表現パターン（InvalidInput、要件 9.7）等で
+    // 起動自体が失敗した場合（要件 2.6）。formatError が AppError.message を
+    // 表示するため、無効パターンの詳細もそのまま UI に出る。
+    renderError(ops.inferResult, err);
+    finishInference();
+  }
 });
 
 ops.inferCancel.addEventListener("click", async () => {
@@ -1051,32 +1216,348 @@ ops.inferCancel.addEventListener("click", async () => {
     renderError(ops.inferResult, err);
   } finally {
     finishInference();
+    // キャンセル時は完了イベントが来ないため、完了購読も解除する。
+    stopCompleteSubscription();
   }
 });
 
-// ---- モデル選択（要件 15.1, 15.5） ----
+// ---- Tag_Overview（バッチ後タグ一覧、要件 11.1〜11.6、タスク 18.1） ----
+//
+// バッチ推論完了イベント（inference://complete）で受け取った TagOverview を
+// 採用/不採用の 2 区分で描画する。検索は overview_search、keep/exclude 送出は
+// overview_send_keep / overview_send_exclude、再推論は更新後 filter で同一
+// バッチへ start_inference を再実行して完了イベントで一覧を更新する。
 
-ops.modelLocalPick.addEventListener("click", () => pickFolderInto(ops.modelLocalDir));
+/**
+ * 現在表示すべき overview（検索絞り込み中なら overviewFiltered、無ければ
+ * overview）を返す。overview が無ければ null。
+ */
+function currentOverview() {
+  if (state.overviewFiltered) return state.overviewFiltered;
+  return state.overview;
+}
 
-/** モデル一覧を取得してドロップダウン（モデルタブ・推論タブ）へ反映する。 */
+/**
+ * 1 タグ（TagStat）の行要素を構築する（タグ名＋代表確信度、要件 11.2）。
+ * 行はクリックで選択トグルできる。選択中のタグは keep/exclude 送出の対象になる
+ * （要件 11.4, 11.5）。
+ */
+function buildOverviewRow(stat) {
+  const row = document.createElement("div");
+  row.className = "overview-row";
+  row.tabIndex = 0;
+  row.setAttribute("role", "button");
+  const selected = state.overviewSelected.has(stat.name);
+  row.classList.toggle("selected", selected);
+  row.setAttribute("aria-pressed", selected ? "true" : "false");
+  row.title = "クリックで選択/解除";
+
+  const name = document.createElement("span");
+  name.className = "overview-tag-name";
+  name.textContent = stat.name;
+  const conf = document.createElement("span");
+  conf.className = "overview-tag-conf";
+  // representative_confidence は 0.0〜1.0。出現画像数も併記する。
+  const pct = (Number(stat.representative_confidence) * 100).toFixed(1);
+  conf.textContent = `${pct}%（${stat.image_count} 枚）`;
+  row.appendChild(name);
+  row.appendChild(conf);
+
+  // クリック/Enter/Space で選択をトグルする。
+  const toggle = () => toggleOverviewSelection(stat.name, row);
+  row.addEventListener("click", toggle);
+  row.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" || ev.key === " ") {
+      ev.preventDefault();
+      toggle();
+    }
+  });
+  return row;
+}
+
+/** タグの選択状態をトグルし、行の見た目と選択件数表示を更新する。 */
+function toggleOverviewSelection(tagName, row) {
+  if (state.overviewSelected.has(tagName)) {
+    state.overviewSelected.delete(tagName);
+  } else {
+    state.overviewSelected.add(tagName);
+  }
+  const on = state.overviewSelected.has(tagName);
+  row.classList.toggle("selected", on);
+  row.setAttribute("aria-pressed", on ? "true" : "false");
+  updateOverviewSelectionHint();
+}
+
+/** 選択中タグの件数を送出ボタン付近へ表示する。 */
+function updateOverviewSelectionHint() {
+  if (!ops.overviewSelectedCount) return;
+  const n = state.overviewSelected.size;
+  ops.overviewSelectedCount.textContent = n > 0 ? `選択 ${n} 件` : "";
+}
+
+/** 1 区分の一覧をリスト要素へ描画する。空なら「なし」を表示する。 */
+function renderOverviewList(el, stats) {
+  el.innerHTML = "";
+  if (!stats || stats.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "inline-note";
+    empty.textContent = "なし";
+    el.appendChild(empty);
+    return;
+  }
+  for (const stat of stats) {
+    el.appendChild(buildOverviewRow(stat));
+  }
+}
+
+/** Tag_Overview を採用/不採用の 2 区分で描画する（要件 11.1, 11.2）。 */
+function renderOverview() {
+  const ov = currentOverview();
+  const adopted = (ov && ov.adopted) || [];
+  const discarded = (ov && ov.discarded) || [];
+  // 現在の overview に存在しないタグの選択は落とす（検索絞り込み等で消えた分）。
+  const present = new Set(visibleOverviewTagNames());
+  for (const name of [...state.overviewSelected]) {
+    if (!present.has(name)) state.overviewSelected.delete(name);
+  }
+  renderOverviewList(ops.overviewAdopted, adopted);
+  renderOverviewList(ops.overviewDiscarded, discarded);
+  ops.overviewAdoptedCount.textContent = `${adopted.length} 件`;
+  ops.overviewDiscardedCount.textContent = `${discarded.length} 件`;
+  updateOverviewSelectionHint();
+}
+
+/** 現在の overview（検索絞り込み後含む）に含まれる全タグ名を返す。 */
+function visibleOverviewTagNames() {
+  const ov = currentOverview();
+  if (!ov) return [];
+  const names = [];
+  for (const s of ov.adopted || []) names.push(s.name);
+  for (const s of ov.discarded || []) names.push(s.name);
+  return names;
+}
+
+/**
+ * 選択中タグのうち、現在の overview に実在するタグ名を返す。
+ * keep/exclude 送出は「選択中のタグ」を対象にする（要件 11.4, 11.5）。
+ */
+function selectedOverviewTagNames() {
+  const visible = new Set(visibleOverviewTagNames());
+  return [...state.overviewSelected].filter((name) => visible.has(name));
+}
+
+/** 検索入力で overview_search を呼び表示を絞り込む（要件 11.3）。 */
+async function applyOverviewSearch() {
+  if (!state.overview) return;
+  const query = ops.overviewSearch.value;
+  if (!query || query.trim().length === 0) {
+    // 空クエリは全件表示（overviewFiltered を解除）。
+    state.overviewFiltered = null;
+    renderOverview();
+    return;
+  }
+  try {
+    // design のコマンド境界に従い overview_search へ委譲する（要件 11.3）。
+    const filtered = await invoke("overview_search", {
+      overview: state.overview,
+      query,
+    });
+    state.overviewFiltered = filtered;
+    renderOverview();
+  } catch (err) {
+    renderError(ops.overviewResult, err);
+  }
+}
+
+// 検索入力はデバウンスして overview_search を呼ぶ。
+let overviewSearchTimer = null;
+ops.overviewSearch.addEventListener("input", () => {
+  if (overviewSearchTimer) clearTimeout(overviewSearchTimer);
+  overviewSearchTimer = setTimeout(applyOverviewSearch, 200);
+});
+
+/**
+ * 選択中タグを Keep_Tags / Exclude_Rules へ送る（要件 11.4, 11.5）。
+ * command（overview_send_keep / overview_send_exclude）に現在の RawTagFilter と
+ * 選択中タグを渡し、更新後 filter を Tag_Filter 入力欄（keep/exclude テキスト
+ * エリア）へ反映する。これにより次回推論・再推論に一貫して効く。送出後は選択を
+ * クリアする。
+ */
+async function sendSelectedTags(command) {
+  const tags = selectedOverviewTagNames();
+  if (tags.length === 0) {
+    renderText(ops.overviewResult, "送出対象のタグがありません（タグをクリックして選択してください）");
+    return;
+  }
+  const filter = buildRawTagFilter();
+  try {
+    const updated = await invoke(command, { filter, tags });
+    // 更新後の keep / exclude を Tag_Filter 入力欄へ反映する（改行区切り）。
+    ops.filterKeepTags.value = (updated.keep || []).join("\n");
+    ops.filterExcludeRules.value = (updated.exclude || []).join("\n");
+    // 送出済みタグの選択を解除して再描画する。
+    state.overviewSelected.clear();
+    renderOverview();
+    renderText(
+      ops.overviewResult,
+      `${tags.length} 件のタグを送出しました。更新後フィルタで再推論すると一覧へ反映されます（要件 11.6）`,
+      true
+    );
+  } catch (err) {
+    renderError(ops.overviewResult, err);
+  }
+}
+
+ops.overviewKeep.addEventListener("click", () => sendSelectedTags("overview_send_keep"));
+ops.overviewExclude.addEventListener("click", () => sendSelectedTags("overview_send_exclude"));
+
+/**
+ * 選択中タグを Replace_Rules 入力欄へ送る。
+ *
+ * Replace_Rules は「検索,置換」を 1 行 1 対で書く形式（parseReplaceRules 参照）。
+ * 選択タグ `foo` は検索側に入れ、置換先は未指定にするため各行を `foo,` の形で
+ * 追記する（タグごとにカンマを付ける）。ユーザーは後から置換先を書き足せる。
+ * 既存行と同じ検索パターンの重複行は追加しない。送出後は選択をクリアする。
+ */
+ops.overviewReplace.addEventListener("click", () => {
+  const tags = selectedOverviewTagNames();
+  if (tags.length === 0) {
+    renderText(ops.overviewResult, "送出対象のタグがありません（タグをクリックして選択してください）");
+    return;
+  }
+  // 既存の Replace_Rules 行を保持しつつ、検索側の重複を避けて追記する。
+  const existing = ops.filterReplaceRules.value
+    .split("\n")
+    .map((l) => l.replace(/\r$/, ""));
+  // 既存行の検索側（最初の「,」より前）を正規化キーで集合化する。
+  const existingSearchKeys = new Set(
+    existing
+      .map((line) => {
+        const idx = line.indexOf(",");
+        const search = idx < 0 ? line : line.slice(0, idx);
+        return search.trim().toLowerCase();
+      })
+      .filter((k) => k.length > 0)
+  );
+  const lines = existing.filter((l) => l.trim().length > 0);
+  let added = 0;
+  for (const tag of tags) {
+    const key = tag.trim().toLowerCase();
+    if (key.length === 0 || existingSearchKeys.has(key)) continue;
+    existingSearchKeys.add(key);
+    // タグごとにカンマを付けて「検索,（置換は空）」の行を追加する。
+    lines.push(`${tag},`);
+    added++;
+  }
+  ops.filterReplaceRules.value = lines.join("\n");
+  state.overviewSelected.clear();
+  renderOverview();
+  renderText(
+    ops.overviewResult,
+    `${added} 件のタグを Replace_Rules へ送出しました（置換先を入力してください）`,
+    true
+  );
+});
+
+/**
+ * 更新後フィルタで同一バッチへ再推論する（要件 11.6）。
+ *
+ * rerun_inference コマンドは各画像の生 Predicted_Tag 列（per_image_predicted）を
+ * 要するが、start_inference の結果（InferBatchResult）は overview のみで生 Tag 列を
+ * 含まないため、フロントは per_image_predicted を保持できない。よって再推論は
+ * 「保持した直近バッチ（lastInferTargets）へ、更新後 filter で start_inference を
+ * 再実行する」形で実現する。完了イベント（inference://complete）で更新後の
+ * overview が届き一覧が再描画される。これにより Keep/Exclude 送出後の結果が
+ * 一覧へ反映される（要件 11.6）。
+ */
+ops.overviewRerun.addEventListener("click", async () => {
+  if (state.lastInferTargets.length === 0) {
+    renderText(ops.overviewResult, "再推論する対象バッチがありません（先に推論を実行してください）");
+    return;
+  }
+  const modelId = ops.inferModel.value;
+  if (!modelId) {
+    renderText(ops.overviewResult, "先にモデルを選択してください（モデル管理タブ）");
+    return;
+  }
+  const batchRaw = ops.inferBatch.value.trim();
+  const batchSize = batchRaw === "" ? null : Number(batchRaw);
+
+  state.inferOperationId = "rerun-" + Date.now();
+  ops.inferRun.disabled = true;
+  ops.inferCancel.disabled = false;
+  await startProgressSubscription();
+  await startCompleteSubscription();
+
+  const filter = buildRawTagFilter();
+  renderText(ops.overviewResult, "更新後フィルタで再推論中…");
+  try {
+    await invoke("start_inference", {
+      variantId: modelId,
+      filter,
+      imagePaths: state.lastInferTargets,
+      batchSize,
+      operationId: state.inferOperationId,
+    });
+  } catch (err) {
+    renderError(ops.overviewResult, err);
+    finishInference();
+    stopCompleteSubscription();
+  }
+});
+
+// ---- モデル管理（カタログ一覧・存在状態・ダウンロード、要件 1.1, 1.2, 3.1, 3.5, 5.1, 5.3） ----
+//
+// 固定 Model_Dir 方針（要件 2）に伴い、任意ローカルディレクトリ選択 UI は撤去した。
+// Model_Dir は Rust が PathResolver から解決するため base_dir 引数は渡さない。
+
+/** ModelFamily（serde snake_case）を日本語表示へ変換する。 */
+function familyLabel(family) {
+  if (family === "wd14") return "WD14";
+  if (family === "ml_danbooru") return "ML-Danbooru";
+  return family || "";
+}
+
+/**
+ * カタログを取得して Model_Management_Tab へ描画する（要件 1.1, 1.2, 3.1, 3.5）。
+ * 推論タブのモデル選択（inferModel）へも全 variant を反映する。
+ */
 async function refreshModels() {
-  const localDir = ops.modelLocalDir.value.trim();
   ops.modelResult.classList.remove("err");
   ops.modelResult.textContent = "取得中…";
   try {
-    const listing = await invoke("list_models", {
-      localModelDir: localDir || null,
-    });
-    state.models = listing;
-    populateModelSelect(ops.modelList, listing.available);
-    populateModelSelect(ops.inferModel, listing.available);
+    // base_dir は Rust が解決するため引数不要（固定 Model_Dir 方針）。
+    const listing = await invoke("list_catalog");
+    state.models = {
+      variants: listing.variants || [],
+      excluded: listing.excluded || [],
+      model_dir_present: !!listing.model_dir_present,
+    };
+    renderCatalog();
+    populateInferModelSelect();
+
+    // Model_Dir 未作成の旨を表示（要件 3.5）。
+    ops.modelDirNote.textContent = state.models.model_dir_present
+      ? ""
+      : "Model_Dir は未作成（初回ダウンロード時に作成される）";
+
+    // 保存先パスをテキストとして表示する（開くボタンは持たない）。
+    try {
+      ops.modelDirPath.textContent = await invoke("get_model_dir_path");
+    } catch {
+      ops.modelDirPath.textContent = "（取得できません）";
+    }
+
+    // 除外バリアント（必須フィールド欠落、要件 1.2/1.4）。
     ops.modelExcluded.textContent =
-      listing.excluded.length > 0
-        ? `対象外（ONNX なし）: ${listing.excluded.map((m) => m.display_name).join(", ")}`
+      state.models.excluded.length > 0
+        ? `対象外: ${state.models.excluded.map((m) => m.display_name || m.id).join(", ")}`
         : "";
+
+    const presentCount = state.models.variants.filter((vp) => vp.present).length;
     renderText(
       ops.modelResult,
-      `${listing.available.length} 件のモデルが利用可能`,
+      `カタログ ${state.models.variants.length} 件（取得済み ${presentCount} 件）`,
       true
     );
   } catch (err) {
@@ -1084,81 +1565,195 @@ async function refreshModels() {
   }
 }
 
-/** ModelVariant 配列を <select> の <option> へ展開する。 */
-function populateModelSelect(select, variants) {
-  select.innerHTML = "";
-  for (const v of variants) {
-    const opt = document.createElement("option");
-    opt.value = v.id;
-    const loc = v.location && v.location.type === "local" ? "ローカル" : "リモート";
-    opt.textContent = `${v.display_name}（${loc}）`;
-    select.appendChild(opt);
+/**
+ * カタログ各バリアントを行として描画する（要件 1.1, 3.1, 5.1）。
+ * 各行: 表示名・系統・存在バッジ（Model_Present/Not_Present）・DL ボタン・
+ * キャンセルボタン・進捗バー。カタログが空なら登録済みモデルなしを表示（要件 1.2）。
+ */
+function renderCatalog() {
+  ops.modelCatalog.innerHTML = "";
+  if (state.models.variants.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "inline-note";
+    empty.textContent = "登録済みモデルがありません";
+    ops.modelCatalog.appendChild(empty);
+    return;
+  }
+
+  for (const vp of state.models.variants) {
+    ops.modelCatalog.appendChild(buildVariantRow(vp));
   }
 }
 
-/** 現在選択中の ModelVariant オブジェクトを返す。 */
-function selectedVariant() {
-  const id = ops.modelList.value;
-  return state.models.available.find((v) => v.id === id) || null;
+/** 1 バリアント分の行要素を構築する。 */
+function buildVariantRow(vp) {
+  const variant = vp.variant;
+  const row = document.createElement("div");
+  row.className = "model-row";
+  row.dataset.variantId = variant.id;
+
+  // 表示名 + 系統。
+  const info = document.createElement("div");
+  info.className = "model-info";
+  const name = document.createElement("span");
+  name.className = "model-name";
+  name.textContent = variant.display_name;
+  name.title = variant.id;
+  const fam = document.createElement("span");
+  fam.className = "model-family";
+  fam.textContent = familyLabel(variant.family);
+  info.appendChild(name);
+  info.appendChild(fam);
+  row.appendChild(info);
+
+  // 存在バッジ（要件 3.1）。
+  const badge = document.createElement("span");
+  badge.className = "model-badge " + (vp.present ? "present" : "not-present");
+  badge.textContent = vp.present ? "取得済み" : "未取得";
+  row.appendChild(badge);
+
+  // 操作領域（DL / キャンセル）。
+  const actions = document.createElement("div");
+  actions.className = "model-actions";
+  const dlBtn = document.createElement("button");
+  dlBtn.type = "button";
+  dlBtn.className = "model-download-btn";
+  dlBtn.textContent = vp.present ? "再ダウンロード" : "ダウンロード";
+  dlBtn.addEventListener("click", () => startVariantDownload(variant.id, row));
+  const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
+  cancelBtn.className = "model-cancel-btn danger";
+  cancelBtn.textContent = "キャンセル";
+  cancelBtn.disabled = true;
+  cancelBtn.addEventListener("click", () => cancelVariantDownload(variant.id));
+  actions.appendChild(dlBtn);
+  actions.appendChild(cancelBtn);
+  row.appendChild(actions);
+
+  // 進捗バー（0〜100%、要件 5.3）。
+  const progWrap = document.createElement("div");
+  progWrap.className = "model-progress-wrap";
+  const prog = document.createElement("progress");
+  prog.className = "model-progress";
+  prog.max = 100;
+  prog.value = 0;
+  prog.hidden = true;
+  const progText = document.createElement("span");
+  progText.className = "model-progress-text inline-note";
+  progWrap.appendChild(prog);
+  progWrap.appendChild(progText);
+  row.appendChild(progWrap);
+
+  return row;
+}
+
+/** 推論タブのモデル選択に全 variant を反映する（present 問わず選択可）。 */
+function populateInferModelSelect() {
+  const select = ops.inferModel;
+  const prev = select.value;
+  select.innerHTML = "";
+  for (const vp of state.models.variants) {
+    const v = vp.variant;
+    const opt = document.createElement("option");
+    opt.value = v.id;
+    opt.textContent = vp.present
+      ? v.display_name
+      : `${v.display_name}（未取得・DL後推論）`;
+    select.appendChild(opt);
+  }
+  // 以前の選択を可能なら維持する。
+  if (prev && state.models.variants.some((vp) => vp.variant.id === prev)) {
+    select.value = prev;
+  }
 }
 
 ops.modelRefresh.addEventListener("click", refreshModels);
 
-ops.modelLoadLocal.addEventListener("click", async () => {
-  // ローカルディレクトリを直接読み込む（要件 15.2）。
-  let dir = ops.modelLocalDir.value.trim();
-  if (!dir) {
-    // 未入力ならダイアログで選択させる。
-    try {
-      const selected = await dialog.open({ directory: true, multiple: false });
-      if (!selected) return;
-      dir = selected;
-      ops.modelLocalDir.value = dir;
-    } catch (err) {
-      renderError(ops.modelResult, err);
-      return;
-    }
-  }
-  ops.modelResult.classList.remove("err");
-  ops.modelResult.textContent = "読込中…";
-  try {
-    const info = await invoke("load_local_model", { dir });
-    renderText(
-      ops.modelResult,
-      `ローカルモデル読込成功: 入力サイズ ${info.input_size}, ラベル ${info.label_count} 件`,
-      true
-    );
-    refreshModels();
-  } catch (err) {
-    renderError(ops.modelResult, err);
-  }
-});
+/**
+ * バリアントのダウンロードを開始する（要件 5.1, 5.2, 5.3）。
+ * spawn_variant_download（variant_id + operation_id）を呼び、進捗イベント
+ * （inference://progress）を operation_id でフィルタして 0〜100% 表示する。
+ * 完了検知（done>=total）後は refreshModels で present 状態を更新する（要件 5.5）。
+ */
+async function startVariantDownload(variantId, row) {
+  // 既に進行中なら二重起動しない。
+  if (state.downloadOps[variantId]) return;
 
-ops.modelDownload.addEventListener("click", async () => {
-  const variant = selectedVariant();
-  if (!variant) {
-    renderText(ops.modelResult, "ダウンロードするモデルを選択してください");
-    return;
-  }
-  // 保存先を選ばせる。
-  let destDir;
+  const dlBtn = row.querySelector(".model-download-btn");
+  const cancelBtn = row.querySelector(".model-cancel-btn");
+  const prog = row.querySelector(".model-progress");
+  const progText = row.querySelector(".model-progress-text");
+
+  const operationId = "download-" + variantId + "-" + Date.now();
+
+  // 進捗イベント購読（operation_id でフィルタ）。
+  let unlisten = null;
+  const cleanup = () => {
+    if (unlisten) {
+      try {
+        unlisten();
+      } catch {
+        /* 解除失敗は無視 */
+      }
+    }
+    delete state.downloadOps[variantId];
+    dlBtn.disabled = false;
+    cancelBtn.disabled = true;
+    prog.hidden = true;
+  };
+
   try {
-    destDir = await dialog.open({ directory: true, multiple: false, title: "保存先" });
+    unlisten = await tauriEvent.listen("inference://progress", (evt) => {
+      const p = evt.payload || {};
+      if (p.operation_id !== operationId) return;
+      const total = p.total || 0;
+      const done = p.done || 0;
+      const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+      prog.value = pct;
+      progText.textContent = `${pct}%`;
+      if (total > 0 && done >= total) {
+        // 完了検知（要件 5.5）。present 状態を再取得で反映する。
+        progText.textContent = "完了";
+        cleanup();
+        refreshModels();
+      }
+    });
   } catch (err) {
     renderError(ops.modelResult, err);
     return;
   }
-  if (!destDir) return;
-  ops.modelResult.classList.remove("err");
-  ops.modelResult.textContent = "ダウンロード中…";
+
+  state.downloadOps[variantId] = { operationId, cleanup };
+  dlBtn.disabled = true;
+  cancelBtn.disabled = false;
+  prog.hidden = false;
+  prog.value = 0;
+  progText.textContent = "0%";
+
   try {
-    const saved = await invoke("download_model", { variant, destDir });
-    renderText(ops.modelResult, `ダウンロード完了: ${saved}`, true);
+    // 別スレッドで spawn し即戻る（要件 5.2）。完了検知は進捗イベントで行う。
+    await invoke("spawn_variant_download", { variantId, operationId });
+  } catch (err) {
+    renderError(ops.modelResult, err);
+    cleanup();
+  }
+}
+
+/** 進行中のバリアントダウンロードをキャンセルする（要件 5.4）。 */
+async function cancelVariantDownload(variantId) {
+  const entry = state.downloadOps[variantId];
+  if (!entry) return;
+  try {
+    await invoke("cancel_operation", { operationId: entry.operationId });
+    renderText(ops.modelResult, "キャンセルを要求しました");
+  } catch (err) {
+    renderError(ops.modelResult, err);
+  } finally {
+    entry.cleanup();
+    // キャンセル後の存在状態を再取得（部分ファイルは Rust が除去、要件 5.4）。
     refreshModels();
-  } catch (err) {
-    renderError(ops.modelResult, err);
   }
-});
+}
 
 // ---- Windows 限定（symlink 作成 + パス変換、要件 13.2, 16.6） ----
 

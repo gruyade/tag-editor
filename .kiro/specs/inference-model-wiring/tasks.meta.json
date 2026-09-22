@@ -1,0 +1,266 @@
+{
+  "pbtResults": {
+    "1. バグ条件探索テストを書く（修正前・反例の可視化）": {
+      "status": "passed",
+      "failingExample": "未修正コードで全 7 ケースが FAIL（バグ存在の証明＝探索テストとしての成功）。cargo test --test pbt_inference_model_wiring_bug_condition。反例:\n- 反例1(a) 推論起動不在: start_inference コマンドが adapters.rs に未定義／app.rs の generate_handler! に未登録／frontend/main.js が invoke(\"start_inference\") を呼ばない（要件 2.1, 2.2）。\n- 反例2(b) セッション保持不在: ModelSessionState 型が存在せず manage もされず、load_local_model がセッションを保持しない（LoadedModelInfo だけ返し ort::Session をドロップ）（要件 2.4, 2.5）。\n- 反例3(c) ダウンロード同期・進捗なし: spawn_model_download コマンドが未定義／未登録、frontend が download_model を直接 await（別スレッド spawn・進捗・キャンセル未配線）（要件 2.7, 2.8, 2.9）。\n- 反例4(d) プレビュー JSON 転送: get_thumbnail_path/get_preview_path 新経路が未定義、frontend が convertFileSrc 未使用かつ pngBytesToDataUrl(thumb.png/preview.png) で手動 Base64 化（要件 2.10, 2.11, 2.12）。\ntest result: FAILED. 0 passed; 7 failed。",
+      "lastRunTimestamp": 1789987925943
+    }
+  },
+  "executionHistory": {
+    "1. バグ条件探索テストを書く（修正前・反例の可視化）": [
+      {
+        "executionId": "28022a42-0bc9-4cb9-9b8e-47ce01fa3d9a",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789987734887
+      },
+      {
+        "executionId": "28022a42-0bc9-4cb9-9b8e-47ce01fa3d9a",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789987753597
+      },
+      {
+        "executionId": "28022a42-0bc9-4cb9-9b8e-47ce01fa3d9a",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789987949257
+      }
+    ],
+    "2. 保持プロパティテストを書く（修正前・観測優先）": [
+      {
+        "executionId": "28022a42-0bc9-4cb9-9b8e-47ce01fa3d9a",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789987735082
+      },
+      {
+        "executionId": "28022a42-0bc9-4cb9-9b8e-47ce01fa3d9a",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789987954203
+      },
+      {
+        "executionId": "db28463c-db86-4134-b597-3e391b2658da",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789998973631
+      },
+      {
+        "executionId": "db28463c-db86-4134-b597-3e391b2658da",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789998981726
+      }
+    ],
+    "3.1 アプリ層モデルセッション状態管理（ModelSessionState）を追加する": [
+      {
+        "executionId": "28022a42-0bc9-4cb9-9b8e-47ce01fa3d9a",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789987735279
+      },
+      {
+        "executionId": "960bc503-b6da-4dd2-9664-5a201c557b4a",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789988926700
+      },
+      {
+        "executionId": "960bc503-b6da-4dd2-9664-5a201c557b4a",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789989012950
+      }
+    ],
+    "3.2 `load_local_model` を拡張してセッションを保持する": [
+      {
+        "executionId": "28022a42-0bc9-4cb9-9b8e-47ce01fa3d9a",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789987735380
+      },
+      {
+        "executionId": "960bc503-b6da-4dd2-9664-5a201c557b4a",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789989025037
+      },
+      {
+        "executionId": "960bc503-b6da-4dd2-9664-5a201c557b4a",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789989438175
+      }
+    ],
+    "3.3 所有権を持つ Send な推論 runner（OwnedOrtRunner）を追加する": [
+      {
+        "executionId": "28022a42-0bc9-4cb9-9b8e-47ce01fa3d9a",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789987735457
+      },
+      {
+        "executionId": "960bc503-b6da-4dd2-9664-5a201c557b4a",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789989442582
+      },
+      {
+        "executionId": "960bc503-b6da-4dd2-9664-5a201c557b4a",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789989582525
+      }
+    ],
+    "3.4 バッチ推論起動コマンド `start_inference` を追加する": [
+      {
+        "executionId": "28022a42-0bc9-4cb9-9b8e-47ce01fa3d9a",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789987735527
+      },
+      {
+        "executionId": "960bc503-b6da-4dd2-9664-5a201c557b4a",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789989588133
+      },
+      {
+        "executionId": "db28463c-db86-4134-b597-3e391b2658da",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789998993678
+      },
+      {
+        "executionId": "db28463c-db86-4134-b597-3e391b2658da",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789999006181
+      }
+    ],
+    "3.5 モデルダウンロード spawn コマンド `spawn_model_download` を追加する": [
+      {
+        "executionId": "28022a42-0bc9-4cb9-9b8e-47ce01fa3d9a",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789987735580
+      },
+      {
+        "executionId": "db28463c-db86-4134-b597-3e391b2658da",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789999019634
+      },
+      {
+        "executionId": "db28463c-db86-4134-b597-3e391b2658da",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789999395750
+      }
+    ],
+    "3.6 新コマンドを `generate_handler!` に登録する": [
+      {
+        "executionId": "28022a42-0bc9-4cb9-9b8e-47ce01fa3d9a",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789987735674
+      },
+      {
+        "executionId": "db28463c-db86-4134-b597-3e391b2658da",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789999419870
+      },
+      {
+        "executionId": "db28463c-db86-4134-b597-3e391b2658da",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789999566812
+      }
+    ],
+    "3.7 プレビュー/サムネイル転送を再設計する（Asset Protocol + キャッシュ）": [
+      {
+        "executionId": "28022a42-0bc9-4cb9-9b8e-47ce01fa3d9a",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789987735730
+      },
+      {
+        "executionId": "db28463c-db86-4134-b597-3e391b2658da",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789999582212
+      },
+      {
+        "executionId": "db28463c-db86-4134-b597-3e391b2658da",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789999917463
+      }
+    ],
+    "3.8 フロントエンドの結線（`frontend/main.js`）": [
+      {
+        "executionId": "28022a42-0bc9-4cb9-9b8e-47ce01fa3d9a",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789987735794
+      },
+      {
+        "executionId": "db28463c-db86-4134-b597-3e391b2658da",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789999923656
+      },
+      {
+        "executionId": "db28463c-db86-4134-b597-3e391b2658da",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1790001657848
+      }
+    ],
+    "3.9 バグ条件探索テストが PASS することを確認する": [
+      {
+        "executionId": "28022a42-0bc9-4cb9-9b8e-47ce01fa3d9a",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789987735902
+      },
+      {
+        "executionId": "db28463c-db86-4134-b597-3e391b2658da",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1790001663805
+      },
+      {
+        "executionId": "db28463c-db86-4134-b597-3e391b2658da",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1790001677333
+      }
+    ],
+    "3.10 保持テストが引き続き PASS することを確認する": [
+      {
+        "executionId": "28022a42-0bc9-4cb9-9b8e-47ce01fa3d9a",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789987735994
+      },
+      {
+        "executionId": "db28463c-db86-4134-b597-3e391b2658da",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1790001682827
+      },
+      {
+        "executionId": "db28463c-db86-4134-b597-3e391b2658da",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1790001724823
+      }
+    ],
+    "4. 起動スモークテスト（新コマンド登録・State 管理の確認）": [
+      {
+        "executionId": "28022a42-0bc9-4cb9-9b8e-47ce01fa3d9a",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789987736053
+      },
+      {
+        "executionId": "db28463c-db86-4134-b597-3e391b2658da",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1790001731438
+      },
+      {
+        "executionId": "db28463c-db86-4134-b597-3e391b2658da",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1790002325218
+      }
+    ],
+    "5. チェックポイント - 全テストの通過を確認する": [
+      {
+        "executionId": "28022a42-0bc9-4cb9-9b8e-47ce01fa3d9a",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1789987736113
+      },
+      {
+        "executionId": "db28463c-db86-4134-b597-3e391b2658da",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1790002331145
+      },
+      {
+        "executionId": "db28463c-db86-4134-b597-3e391b2658da",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1790002455789
+      }
+    ],
+    "3. 不具合 1〜4 の修正（結線・State・転送方式の追加）": [
+      {
+        "executionId": "db28463c-db86-4134-b597-3e391b2658da",
+        "chatSessionId": "sess_03e4bae0-8e06-4187-b67b-413d7cebe3f7",
+        "timestamp": 1790001724905
+      }
+    ]
+  }
+}

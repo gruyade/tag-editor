@@ -37,9 +37,9 @@ fn tag_strategy() -> impl Strategy<Value = String> {
         Just("long_hair"),
         Just("1girl"),
         Just("Solo"),
-        Just("ネコ"),       // マルチバイト
-        Just("大きい_耳"),  // マルチバイト＋アンダースコア
-        Just(""),           // トリム後に空になり得る（空白のみタグ相当）
+        Just("ネコ"),      // マルチバイト
+        Just("大きい_耳"), // マルチバイト＋アンダースコア
+        Just(""),          // トリム後に空になり得る（空白のみタグ相当）
     ];
     (
         body,

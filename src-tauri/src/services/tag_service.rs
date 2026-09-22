@@ -172,10 +172,7 @@ mod tests {
         fs::write(image.with_extension("txt"), "1girl, Solo").unwrap();
 
         // 既存と正規化キーが一致する " solo " は増やさず、新規 "long hair" のみ追加。
-        let report = bulk_add_tags(
-            &[&image],
-            &[" solo ".to_string(), "long hair".to_string()],
-        );
+        let report = bulk_add_tags(&[&image], &[" solo ".to_string(), "long hair".to_string()]);
 
         assert_eq!(report.succeeded, 1);
         assert_eq!(read_raw(&image), "1girl, Solo, long hair");
@@ -539,9 +536,18 @@ mod aggregate_and_filter_tests {
         assert_eq!(
             result.tags,
             vec![
-                TagCount { tag: "cat".into(), count: 3 },
-                TagCount { tag: "dog".into(), count: 2 },
-                TagCount { tag: "bird".into(), count: 1 },
+                TagCount {
+                    tag: "cat".into(),
+                    count: 3
+                },
+                TagCount {
+                    tag: "dog".into(),
+                    count: 2
+                },
+                TagCount {
+                    tag: "bird".into(),
+                    count: 1
+                },
             ]
         );
     }
@@ -558,8 +564,14 @@ mod aggregate_and_filter_tests {
         assert_eq!(
             result.tags,
             vec![
-                TagCount { tag: "cat".into(), count: 1 },
-                TagCount { tag: "dog".into(), count: 1 },
+                TagCount {
+                    tag: "cat".into(),
+                    count: 1
+                },
+                TagCount {
+                    tag: "dog".into(),
+                    count: 1
+                },
             ]
         );
     }
@@ -580,8 +592,14 @@ mod aggregate_and_filter_tests {
         assert_eq!(
             result.tags,
             vec![
-                TagCount { tag: "cat".into(), count: 1 },
-                TagCount { tag: "dog".into(), count: 1 },
+                TagCount {
+                    tag: "cat".into(),
+                    count: 1
+                },
+                TagCount {
+                    tag: "dog".into(),
+                    count: 1
+                },
             ]
         );
     }
@@ -639,8 +657,7 @@ mod aggregate_and_filter_tests {
         make_image(dir.path(), "c", Some("cat, sky"));
 
         // include=[cat, dog] かつ exclude=[night] → a のみ。
-        let result =
-            filter_images(dir.path(), &v(&["cat", "dog"]), &v(&["night"])).unwrap();
+        let result = filter_images(dir.path(), &v(&["cat", "dog"]), &v(&["night"])).unwrap();
         let names: Vec<&str> = result.iter().map(|e| e.file_name.as_str()).collect();
         assert_eq!(names, vec!["a.png"]);
     }
@@ -701,9 +718,18 @@ mod aggregate_and_filter_tests {
         assert_eq!(
             result.tags,
             vec![
-                TagCount { tag: "cat".into(), count: 2 },
-                TagCount { tag: "bird".into(), count: 1 },
-                TagCount { tag: "dog".into(), count: 1 },
+                TagCount {
+                    tag: "cat".into(),
+                    count: 2
+                },
+                TagCount {
+                    tag: "bird".into(),
+                    count: 1
+                },
+                TagCount {
+                    tag: "dog".into(),
+                    count: 1
+                },
             ]
         );
     }
@@ -723,8 +749,14 @@ mod aggregate_and_filter_tests {
         assert_eq!(
             result.tags,
             vec![
-                TagCount { tag: "sky".into(), count: 3 },
-                TagCount { tag: "cloud".into(), count: 2 },
+                TagCount {
+                    tag: "sky".into(),
+                    count: 3
+                },
+                TagCount {
+                    tag: "cloud".into(),
+                    count: 2
+                },
             ]
         );
     }

@@ -22,6 +22,6 @@ pub use app::run;
 
 pub use error::{AppError, AppErrorKind, AppResult};
 pub use models::{
-    ChannelOrder, ImageEntry, ImageTagResult, LabelDef, LoadedModel, ModelFamily, ModelLocation,
+    ChannelOrder, ImageEntry, ImageTagResult, LabelDef, LoadedModel, ModelFamily, ModelSource,
     ModelVariant, OperationReport, Progress, SortingOperation, Tag, TagCategory, TagCount,
 };

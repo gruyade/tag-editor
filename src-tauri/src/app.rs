@@ -15,15 +15,36 @@
 //!    登録する（要件 16.1, 16.2）。
 //! 4. フォルダ選択のため tauri-plugin-dialog を初期化する（要件 1.3）。
 
+use std::sync::{Arc, Mutex};
+
 use crate::commands::progress::ProgressEmitter;
 use crate::commands::CancelRegistry;
-use crate::models::Progress;
+use crate::models::{LoadedModel, Progress};
 
 /// 進捗イベントをフロントエンドへ送出するイベント名。
 ///
 /// フロントエンドは `window.__TAURI__.event.listen("inference://progress", ...)`
 /// でこのイベントを購読する（タスク 21.2 のバッチ推論パネルで使用）。
 pub const PROGRESS_EVENT: &str = "inference://progress";
+
+/// バッチ推論完了時に [`crate::models::InferBatchResult`]（`overview` を含む）を
+/// フロントエンドへ送出するイベント名（要件 11.1）。
+///
+/// `start_inference` はバックグラウンドスレッドで推論するため戻り値では
+/// `overview` を返せない。推論完了時にこのイベントで `InferBatchResult` を
+/// emit し、フロントエンドは `window.__TAURI__.event.listen("inference://complete",
+/// ...)` で購読して Tag_Overview を描画する（タスク 18.1）。
+pub const COMPLETE_EVENT: &str = "inference://complete";
+
+/// バッチ推論完了時に `InferBatchResult` をフロントエンドへ送出する。
+///
+/// 送出失敗は握りつぶす（完了通知の欠落は処理そのものを止めない）。
+/// [`crate::commands::adapters::start_inference`] のバックグラウンドスレッドが
+/// 推論完了後にこの関数を呼ぶ経路を注入する。
+pub fn emit_inference_complete(app: &tauri::AppHandle, result: &crate::models::InferBatchResult) {
+    use tauri::Emitter;
+    let _ = app.emit(COMPLETE_EVENT, result);
+}
 
 /// `tauri::AppHandle` を包み、[`ProgressEmitter::emit`] で進捗をフロントエンドへ
 /// 送出するエミッタ（要件 16.7, 17.6）。
@@ -50,6 +71,36 @@ impl ProgressEmitter for TauriProgressEmitter {
     }
 }
 
+/// ロード済みモデルセッションを保持するアプリ層状態管理（要件 2.4, 2.5）。
+///
+/// [`crate::models::LoadedModel`] は `ort::Session` を保持し非 serde・非 `Sync`
+/// （`ort::Session::run` が `&mut` 前提のため内部可変性を持つ）ため、`Mutex` で
+/// 包んで `tauri::State` として `manage` する。現状は選択中モデル単一保持で
+/// 最小結線し、複数モデルの同時保持が必要になれば `Mutex<HashMap<String,
+/// LoadedModel>>` へ拡張する。
+///
+/// `current` は `Arc<Mutex<...>>` で保持する。`tauri::State<'_, T>` は
+/// ライフタイム付きでバックグラウンドスレッドへ move できないため、
+/// [`start_inference`](crate::commands::adapters::start_inference) は
+/// [`ModelSessionState::current_slot`] で共有ハンドル（`Arc`）を取得し、
+/// スレッド内から `AppHandle` を経由せずに直接参照する
+/// （`AppHandle` 非依存の内部ロジックを単体テスト可能にするため）。
+#[derive(Default)]
+pub struct ModelSessionState {
+    /// 選択中モデルの実セッション。未ロード時は `None`。
+    pub current: Arc<Mutex<Option<LoadedModel>>>,
+}
+
+impl ModelSessionState {
+    /// `current` の共有ハンドル（`Arc`）を複製して返す。
+    ///
+    /// バックグラウンドスレッドへ move してモデルの take/書き戻しを行うために
+    /// 用いる（`tauri::State` 自体はスレッドへ move できないため）。
+    pub fn current_slot(&self) -> Arc<Mutex<Option<LoadedModel>>> {
+        Arc::clone(&self.current)
+    }
+}
+
 /// Tauri アプリを構築して起動する（実行時にシステム WebView を要する）。
 ///
 /// - キャンセルレジストリを `manage` し、キャンセルコマンドから参照可能にする。
@@ -65,12 +116,15 @@ impl ProgressEmitter for TauriProgressEmitter {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(CancelRegistry::new())
+        .manage(Arc::new(CancelRegistry::new()))
+        .manage(ModelSessionState::default())
         .invoke_handler(tauri::generate_handler![
             // FileService（要件 1, 2）
             crate::commands::adapters::list_images,
             crate::commands::adapters::get_thumbnail,
             crate::commands::adapters::get_preview,
+            crate::commands::adapters::get_thumbnail_path,
+            crate::commands::adapters::get_preview_path,
             crate::commands::adapters::read_tag_file,
             crate::commands::adapters::write_tag_file,
             // TagService（要件 3, 6, 12）
@@ -89,10 +143,19 @@ pub fn run() {
             // CaptionService（要件 11）
             crate::commands::adapters::find_orphan_captions,
             crate::commands::adapters::delete_orphan_captions,
-            // ModelService（要件 15）
-            crate::commands::adapters::list_models,
-            crate::commands::adapters::load_local_model,
-            crate::commands::adapters::download_model,
+            // ModelService: カタログ一覧・取得状態（要件 1.1, 1.2, 3.1, 3.5）
+            crate::commands::adapters::list_catalog,
+            // モデル保存フォルダのパス解決（UI に表示するテキスト用）
+            crate::commands::adapters::get_model_dir_path,
+            // バリアント取得の spawn（別スレッド・進捗・キャンセル、要件 5.1〜5.5）
+            crate::commands::adapters::spawn_variant_download,
+            // 推論起動（遅延 DL + load を内包、要件 4.1〜4.5, 7.1）
+            crate::commands::adapters::start_inference,
+            // Tag_Overview 変換コマンド群（要件 11.3〜11.6）
+            crate::commands::adapters::overview_search,
+            crate::commands::adapters::overview_send_keep,
+            crate::commands::adapters::overview_send_exclude,
+            crate::commands::adapters::rerun_inference,
             // PlatformService（要件 13, 16.6）
             crate::commands::adapters::capabilities,
             crate::commands::adapters::create_symlink,

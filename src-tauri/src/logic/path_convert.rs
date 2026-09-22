@@ -151,10 +151,7 @@ mod tests {
 
     #[test]
     fn win_to_linux_basic() {
-        assert_eq!(
-            windows_to_linux("C:\\foo\\bar").unwrap(),
-            "/mnt/c/foo/bar"
-        );
+        assert_eq!(windows_to_linux("C:\\foo\\bar").unwrap(), "/mnt/c/foo/bar");
     }
 
     #[test]
@@ -314,7 +311,10 @@ mod tests {
         for input in inputs {
             let linux = windows_to_linux(input).unwrap();
             let back = linux_to_windows(&linux).unwrap();
-            assert_eq!(back, input, "ラウンドトリップ不一致: {input:?} -> {linux:?} -> {back:?}");
+            assert_eq!(
+                back, input,
+                "ラウンドトリップ不一致: {input:?} -> {linux:?} -> {back:?}"
+            );
         }
     }
 }

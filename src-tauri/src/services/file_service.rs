@@ -67,9 +67,8 @@ pub fn list_images(folder: impl AsRef<Path>) -> AppResult<ImageListing> {
     // フォルダとして読み取れない場合はエラー（要件 1.8）。
     // read_dir はファイル・不存在・権限不足を io::Error として返し、
     // From<io::Error> により適切な AppError 種別へ変換される。
-    let read_dir = std::fs::read_dir(folder).map_err(|e| {
-        AppError::from(e).with_path(folder.to_string_lossy().into_owned())
-    })?;
+    let read_dir = std::fs::read_dir(folder)
+        .map_err(|e| AppError::from(e).with_path(folder.to_string_lossy().into_owned()))?;
 
     // 直下のファイルのみ対象。サブディレクトリ・読み取り不能なエントリは除外。
     let mut file_names: Vec<String> = Vec::new();
@@ -341,6 +340,25 @@ fn encode_png(img: &image::RgbaImage) -> Result<Vec<u8>, image::ImageError> {
     Ok(buf)
 }
 
+/// 画像を読み込み、アスペクト比を保ったまま一辺 `max_side` に内接するよう
+/// 縮小する内部共通ヘルパー（拡大はしない）。
+///
+/// [`get_thumbnail`]（`size` をクランプした値）と [`get_preview`]
+/// （[`MAX_PREVIEW_SIZE`]）の双方から呼ばれる、クランプ済みサイズへの
+/// 「縮小（内接・拡大なし）」ロジックの重複を避けるための抽出。
+///
+/// 読み込み・デコードに失敗した場合は `None` を返す。
+fn load_and_resize(path: &Path, max_side: u32) -> Option<image::RgbaImage> {
+    let img = image::open(path).ok()?;
+    let (w, h) = (img.width(), img.height());
+    let resized = if w <= max_side && h <= max_side {
+        img.to_rgba8()
+    } else {
+        img.thumbnail(max_side, max_side).to_rgba8()
+    };
+    Some(resized)
+}
+
 /// 指定 Image_File のサムネイルを生成する（要件 1.3, 1.4, 1.6）。
 ///
 /// - `size` は [`clamp_thumbnail_size`] で 64〜512 にクランプされる（要件 1.4）。
@@ -357,18 +375,9 @@ pub fn get_thumbnail(path: impl AsRef<Path>, size: u32) -> ThumbnailData {
     let size = clamp_thumbnail_size(size);
     let path = path.as_ref();
 
-    let img = match image::open(path) {
-        Ok(img) => img,
-        // 破損等で読み込めない場合は代替表示（要件 1.6）。
-        Err(_) => return ThumbnailData::placeholder(),
-    };
-
-    // アスペクト比を保って size×size に内接させる（拡大はしない）。
-    let (w, h) = (img.width(), img.height());
-    let thumb = if w <= size && h <= size {
-        img.to_rgba8()
-    } else {
-        img.thumbnail(size, size).to_rgba8()
+    // 破損等で読み込めない場合は代替表示（要件 1.6）。
+    let Some(thumb) = load_and_resize(path, size) else {
+        return ThumbnailData::placeholder();
     };
 
     match encode_png(&thumb) {
@@ -396,16 +405,8 @@ pub fn get_thumbnail(path: impl AsRef<Path>, size: u32) -> ThumbnailData {
 pub fn get_preview(path: impl AsRef<Path>) -> PreviewData {
     let path = path.as_ref();
 
-    let img = match image::open(path) {
-        Ok(img) => img,
-        Err(_) => return PreviewData::placeholder(),
-    };
-
-    let (w, h) = (img.width(), img.height());
-    let preview = if w <= MAX_PREVIEW_SIZE && h <= MAX_PREVIEW_SIZE {
-        img.to_rgba8()
-    } else {
-        img.thumbnail(MAX_PREVIEW_SIZE, MAX_PREVIEW_SIZE).to_rgba8()
+    let Some(preview) = load_and_resize(path, MAX_PREVIEW_SIZE) else {
+        return PreviewData::placeholder();
     };
 
     match encode_png(&preview) {
@@ -416,6 +417,204 @@ pub fn get_preview(path: impl AsRef<Path>) -> PreviewData {
             placeholder: false,
         },
         Err(_) => PreviewData::placeholder(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 軽量転送経路: ファイルパス参照 + キャッシュ（タスク 3.7、要件 2.10, 2.11, 2.12）
+// ---------------------------------------------------------------------------
+//
+// 案 A（design 変更 5）: PNG バイト列を JSON 数値配列で転送する代わりに、
+// 縮小済み PNG をアプリキャッシュディレクトリへ書き出し、そのファイルパスを
+// 返す。フロントエンドは `convertFileSrc`（asset protocol）でこのパスを直接
+// 参照でき、JSON 数値配列化・手動 Base64 化を経ない（要件 2.10, 2.11）。
+//
+// 案 B（design 変更 5）: `(path, size, mtime)` をキーに、キャッシュファイルが
+// 既に存在し元画像の mtime が変わっていなければ再デコード・再リサイズ・
+// 再エンコードをスキップする（要件 2.12）。
+//
+// 既存 `get_thumbnail`/`get_preview`（Vec<u8> 版）とその DTO は変更しない
+// （保持 3.10）。失敗時の `placeholder` フォールバック（3.7）・サイズクランプ
+// （3.8）・縮小規約（3.9）は [`load_and_resize`]/[`clamp_thumbnail_size`] を
+// 共用することで不変に保つ。
+
+use std::time::SystemTime;
+
+/// キャッシュ書き出し先のサブディレクトリ名。
+const CACHE_SUBDIR: &str = "tag-editor-cache";
+
+/// キャッシュファイルの書き出し先ディレクトリを返す（要件 2.10, 2.12）。
+///
+/// OS 標準のアプリキャッシュディレクトリ相当として、既存依存関係
+/// （`dirs` 等の追加クレート不要）で完結する [`std::env::temp_dir`] 配下に
+/// 専用サブディレクトリ [`CACHE_SUBDIR`] を用意する。存在しなければ作成する。
+fn cache_dir() -> AppResult<std::path::PathBuf> {
+    let dir = std::env::temp_dir().join(CACHE_SUBDIR);
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| AppError::from(e).with_path(dir.to_string_lossy().into_owned()))?;
+    Ok(dir)
+}
+
+/// 元画像の mtime（`SystemTime`）を取得する。取得できない場合は `None`。
+fn file_mtime(path: &Path) -> Option<SystemTime> {
+    std::fs::metadata(path).ok()?.modified().ok()
+}
+
+/// `(path, size)` からキャッシュファイル名を導出する。
+///
+/// 元パスと目的サイズをハッシュ化し、拡張子 `.png` を付与する。同一
+/// `(path, size)` は常に同一ファイル名になるため、キャッシュヒット判定
+/// （要件 2.12）に利用できる。
+fn cache_file_name(path: &Path, max_side: u32) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut hasher);
+    max_side.hash(&mut hasher);
+    format!("{:016x}.png", hasher.finish())
+}
+
+/// キャッシュファイルが元画像の mtime に対して有効（再生成不要）か判定する
+/// （要件 2.12）。
+///
+/// キャッシュファイルが存在し、その mtime が元画像の mtime 以降であれば
+/// 有効とみなす。元画像の mtime が取得できない場合は安全側に倒し常に
+/// 無効（再生成）とする。
+fn cache_is_fresh(cache_path: &Path, source_mtime: Option<SystemTime>) -> bool {
+    let Some(source_mtime) = source_mtime else {
+        return false;
+    };
+    let Ok(cache_meta) = std::fs::metadata(cache_path) else {
+        return false;
+    };
+    let Ok(cache_mtime) = cache_meta.modified() else {
+        return false;
+    };
+    cache_mtime >= source_mtime
+}
+
+/// [`get_thumbnail_path`]/[`get_preview_path`] が返す軽量 DTO。
+///
+/// PNG バイト列の代わりにファイルパスを返す。フロントエンドはこのパスを
+/// `convertFileSrc`（asset protocol）で `<img src>` に割り当てる。既存
+/// [`ThumbnailData`]/[`PreviewData`] は削除・変更しない（保持 3.10）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImagePathData {
+    /// 表示に使う画像ファイルのパス（縮小キャッシュ、または元ファイル）。
+    /// placeholder 時は空文字列。
+    pub path: String,
+    /// 画像の幅（ピクセル）。placeholder 時は 0。
+    pub width: u32,
+    /// 画像の高さ（ピクセル）。placeholder 時は 0。
+    pub height: u32,
+    /// 代替表示フラグ。読込・生成に失敗した場合 true（要件 1.6 相当）。
+    pub placeholder: bool,
+}
+
+impl ImagePathData {
+    /// 代替表示（プレースホルダ）用の空データを生成する。
+    fn placeholder() -> Self {
+        Self {
+            path: String::new(),
+            width: 0,
+            height: 0,
+            placeholder: true,
+        }
+    }
+}
+
+/// 縮小 PNG をキャッシュへ書き出し、そのパスを返す内部共通ヘルパー。
+///
+/// - `cache_is_fresh` によりキャッシュヒット時は元画像の再デコード・再リサイズ・
+///   再エンコードをスキップし、既存キャッシュファイルのパスをそのまま返す
+///   （要件 2.12）。
+/// - キャッシュミス時は [`load_and_resize`] で縮小し、[`encode_png`] で
+///   エンコードしてキャッシュへ書き出す。
+/// - 読込・エンコード・書き出しのいずれかに失敗した場合は `None` を返す
+///   （呼び出し元で `placeholder` にフォールバックする）。
+fn resize_and_cache(path: &Path, max_side: u32) -> Option<(std::path::PathBuf, u32, u32)> {
+    let dir = cache_dir().ok()?;
+    let file_name = cache_file_name(path, max_side);
+    let cache_path = dir.join(file_name);
+
+    let source_mtime = file_mtime(path);
+
+    if cache_is_fresh(&cache_path, source_mtime) {
+        // キャッシュヒット: 再デコード・再リサイズ・再エンコードを行わない
+        // （要件 2.12）。寸法はキャッシュ済み PNG から読み直す。
+        if let Ok(dims) = image::image_dimensions(&cache_path) {
+            return Some((cache_path, dims.0, dims.1));
+        }
+        // 寸法読み取りに失敗した場合は再生成にフォールバック。
+    }
+
+    let resized = load_and_resize(path, max_side)?;
+    let png = encode_png(&resized).ok()?;
+    std::fs::write(&cache_path, png).ok()?;
+
+    Some((cache_path, resized.width(), resized.height()))
+}
+
+/// 指定 Image_File のサムネイルをキャッシュファイルへ書き出し、そのパスを
+/// 返す（要件 2.10, 2.11, 2.12）。
+///
+/// - `size` は [`clamp_thumbnail_size`] で 64〜512 にクランプされる（保持 3.8）。
+/// - 縮小規約（アスペクト比保持・拡大なし）は既存 [`get_thumbnail`] と同一
+///   （[`load_and_resize`] を共用）。
+/// - 同一 `(path, size)` かつ元画像の mtime が変わっていなければ、既存の
+///   キャッシュファイルパスを再デコードなしで返す（要件 2.12）。
+/// - 読み込み・エンコード・書き出しに失敗した場合は `placeholder=true` の
+///   [`ImagePathData`] を返す（保持 3.7）。
+pub fn get_thumbnail_path(path: impl AsRef<Path>, size: u32) -> ImagePathData {
+    let size = clamp_thumbnail_size(size);
+    let path = path.as_ref();
+
+    match resize_and_cache(path, size) {
+        Some((cache_path, width, height)) => ImagePathData {
+            path: cache_path.to_string_lossy().into_owned(),
+            width,
+            height,
+            placeholder: false,
+        },
+        None => ImagePathData::placeholder(),
+    }
+}
+
+/// 指定 Image_File の拡大プレビュー用パスを返す（要件 2.10, 2.11, 2.12）。
+///
+/// - 元画像が [`MAX_PREVIEW_SIZE`] 以下ならキャッシュへの書き出しを行わず、
+///   元ファイルのパスをそのまま返す（縮小不要・再エンコード不要、保持 3.9）。
+/// - 超過する場合のみ縮小 PNG をキャッシュへ書き出し、そのパスを返す。
+///   キャッシュヒット時は再デコード・再エンコードをスキップする（要件 2.12）。
+/// - 読み込みに失敗した場合は `placeholder=true` の [`ImagePathData`] を返す
+///   （保持 3.7）。
+pub fn get_preview_path(path: impl AsRef<Path>) -> ImagePathData {
+    let path = path.as_ref();
+
+    // 寸法を確認するため軽量にヘッダのみ読む。失敗時は placeholder。
+    let dims = match image::image_dimensions(path) {
+        Ok(d) => d,
+        Err(_) => return ImagePathData::placeholder(),
+    };
+    let (w, h) = dims;
+
+    if w <= MAX_PREVIEW_SIZE && h <= MAX_PREVIEW_SIZE {
+        // 縮小不要: 元ファイルパスをそのまま返す（再エンコード不要、保持 3.9）。
+        return ImagePathData {
+            path: path.to_string_lossy().into_owned(),
+            width: w,
+            height: h,
+            placeholder: false,
+        };
+    }
+
+    match resize_and_cache(path, MAX_PREVIEW_SIZE) {
+        Some((cache_path, width, height)) => ImagePathData {
+            path: cache_path.to_string_lossy().into_owned(),
+            width,
+            height,
+            placeholder: false,
+        },
+        None => ImagePathData::placeholder(),
     }
 }
 
@@ -547,6 +746,169 @@ mod thumbnail_tests {
         let preview = get_preview(&path);
         assert!(preview.placeholder);
         assert!(preview.png.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod path_cache_tests {
+    //! 軽量転送経路（`get_thumbnail_path`/`get_preview_path`）の単体テスト
+    //! （タスク 3.7、要件 2.10, 2.11, 2.12）。
+
+    use super::*;
+    use std::path::PathBuf;
+    use tempfile::tempdir;
+
+    fn write_png(dir: &Path, name: &str, w: u32, h: u32) -> PathBuf {
+        let img = image::RgbaImage::from_pixel(w, h, image::Rgba([80, 40, 160, 255]));
+        let path = dir.join(name);
+        img.save(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn thumbnail_path_writes_cache_file_matching_existing_convention() {
+        let dir = tempdir().unwrap();
+        // 800x400 を size=200 に縮小 → 200x100（既存 get_thumbnail と同じ規約）。
+        let path = write_png(dir.path(), "wide.png", 800, 400);
+
+        let result = get_thumbnail_path(&path, 200);
+        assert!(!result.placeholder);
+        assert!(!result.path.is_empty());
+        assert_eq!(result.width, 200);
+        assert_eq!(result.height, 100);
+
+        // 実際にキャッシュファイルがディスク上に存在する。
+        let cache_path = Path::new(&result.path);
+        assert!(cache_path.exists());
+
+        // 既存 get_thumbnail の縮小規約と一致することを確認。
+        let legacy = get_thumbnail(&path, 200);
+        assert_eq!(legacy.width, result.width);
+        assert_eq!(legacy.height, result.height);
+    }
+
+    #[test]
+    fn thumbnail_path_clamps_and_does_not_upscale() {
+        let dir = tempdir().unwrap();
+        // クランプ確認: size=10（<64）→ 64 にクランプ。
+        let big = write_png(dir.path(), "big.png", 2000, 2000);
+        let clamped = get_thumbnail_path(&big, 10);
+        assert!(!clamped.placeholder);
+        assert_eq!(clamped.width, MIN_THUMBNAIL_SIZE);
+        assert_eq!(clamped.height, MIN_THUMBNAIL_SIZE);
+
+        // 拡大なし確認: 32x16 に size=256 を指定 → 32x16 のまま。
+        let small = write_png(dir.path(), "small.png", 32, 16);
+        let not_upscaled = get_thumbnail_path(&small, 256);
+        assert!(!not_upscaled.placeholder);
+        assert_eq!(not_upscaled.width, 32);
+        assert_eq!(not_upscaled.height, 16);
+    }
+
+    #[test]
+    fn thumbnail_path_corrupt_file_yields_placeholder_with_empty_path() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("broken.png");
+        std::fs::write(&path, b"not an image").unwrap();
+
+        let result = get_thumbnail_path(&path, 128);
+        assert!(result.placeholder);
+        assert!(result.path.is_empty());
+        assert_eq!(result.width, 0);
+        assert_eq!(result.height, 0);
+    }
+
+    #[test]
+    fn preview_path_returns_original_file_path_when_within_limit() {
+        let dir = tempdir().unwrap();
+        let path = write_png(dir.path(), "p.png", 640, 480);
+
+        let result = get_preview_path(&path);
+        assert!(!result.placeholder);
+        // MAX_PREVIEW_SIZE 以下 → 元ファイルパスをそのまま返す（新規ファイル書き出しなし）。
+        assert_eq!(Path::new(&result.path), path.as_path());
+        assert_eq!(result.width, 640);
+        assert_eq!(result.height, 480);
+
+        // キャッシュディレクトリへの書き出しが発生していないことを確認。
+        let cache = cache_dir().unwrap();
+        let entries_before = std::fs::read_dir(&cache).unwrap().count();
+        let _ = get_preview_path(&path);
+        let entries_after = std::fs::read_dir(&cache).unwrap().count();
+        assert_eq!(entries_before, entries_after);
+    }
+
+    #[test]
+    fn preview_path_downscales_and_caches_oversized_image() {
+        let dir = tempdir().unwrap();
+        // 一辺が MAX_PREVIEW_SIZE 超 → 縮小 PNG をキャッシュへ書き出す。
+        let path = write_png(dir.path(), "huge.png", 4096, 2048);
+
+        let result = get_preview_path(&path);
+        assert!(!result.placeholder);
+        assert_ne!(Path::new(&result.path), path.as_path());
+        assert!(result.width <= MAX_PREVIEW_SIZE && result.height <= MAX_PREVIEW_SIZE);
+        assert_eq!(result.width, MAX_PREVIEW_SIZE);
+        assert_eq!(result.height, MAX_PREVIEW_SIZE / 2);
+
+        let cache_path = Path::new(&result.path);
+        assert!(cache_path.exists());
+    }
+
+    #[test]
+    fn preview_path_corrupt_file_yields_placeholder() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("broken.png");
+        std::fs::write(&path, b"nope").unwrap();
+
+        let result = get_preview_path(&path);
+        assert!(result.placeholder);
+        assert!(result.path.is_empty());
+    }
+
+    #[test]
+    fn thumbnail_path_cache_hit_skips_rewrite_on_unchanged_mtime() {
+        let dir = tempdir().unwrap();
+        let path = write_png(dir.path(), "cache-me.png", 800, 400);
+
+        let first = get_thumbnail_path(&path, 200);
+        assert!(!first.placeholder);
+        let cache_path = PathBuf::from(&first.path);
+        let first_write_time = std::fs::metadata(&cache_path).unwrap().modified().unwrap();
+
+        // ファイルシステムの mtime 分解能によりすぐ後の書き込みが同一時刻に
+        // なり得るため、キャッシュファイルの内容自体が保持されることも併せて
+        // 確認する（再生成されても偶然一致し得るサイズ一致だけでなく、
+        // 変更時刻が古い値以上であることを見る）。
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        let second = get_thumbnail_path(&path, 200);
+        assert!(!second.placeholder);
+        assert_eq!(second.path, first.path);
+        let second_write_time = std::fs::metadata(&cache_path).unwrap().modified().unwrap();
+
+        // 元画像の mtime が変わっていないため、キャッシュは再書き込みされず
+        // 変更時刻が変化しない（要件 2.12: 再デコード・再エンコードの削減）。
+        assert_eq!(first_write_time, second_write_time);
+    }
+
+    #[test]
+    fn thumbnail_path_regenerates_when_source_mtime_changes() {
+        let dir = tempdir().unwrap();
+        let path = write_png(dir.path(), "changing.png", 800, 400);
+
+        let first = get_thumbnail_path(&path, 200);
+        assert!(!first.placeholder);
+
+        // 元画像を更新（内容・mtime を変える）。
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        write_png(dir.path(), "changing.png", 400, 800);
+
+        let second = get_thumbnail_path(&path, 200);
+        assert!(!second.placeholder);
+        // 縦横が入れ替わった新しい画像に基づき再生成される。
+        assert_eq!(second.width, 100);
+        assert_eq!(second.height, 200);
     }
 }
 

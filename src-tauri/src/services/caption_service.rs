@@ -227,7 +227,11 @@ mod tests {
     fn delete_skips_missing_paths_and_counts_only_deleted() {
         let dir = tempdir().unwrap();
         touch(dir.path(), "real.txt");
-        let missing = dir.path().join("missing.txt").to_string_lossy().into_owned();
+        let missing = dir
+            .path()
+            .join("missing.txt")
+            .to_string_lossy()
+            .into_owned();
         let real = dir.path().join("real.txt").to_string_lossy().into_owned();
 
         // 存在しないパスを含めても中断せず、削除できた件数のみ数える。

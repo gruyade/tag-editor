@@ -12,11 +12,11 @@
 //!   対象フォルダ直下の各 Image_File を宛先へ移動 / コピーする。対応する
 //!   Tag_File（`<basename>.txt`）が同一フォルダに存在すれば同じ操作を適用し、
 //!   対を維持する。無ければ Image_File のみ処理する（要件 7.2）。
-//! - [`SortingOperation::Gather`]:
+//! - [`SortingOperation::Gather`][]:
 //!   対象フォルダの **直下サブフォルダ** 内の各ファイルについて、当該サブフォルダ
 //!   名を接頭辞として付与（[`naming::gather_name`]）したうえで単一の宛先フォルダ
 //!   へ集約する（要件 7.3）。
-//! - [`SortingOperation::Distribute`]:
+//! - [`SortingOperation::Distribute`][]:
 //!   対象フォルダ直下の各ファイル名を接頭辞部分と元ファイル名部分へ分解
 //!   （[`naming::split_gathered_name`]）し、接頭辞名のサブフォルダを宛先に作成
 //!   または再利用して元ファイル名で配置する（要件 7.4）。分解できないファイルは
@@ -77,19 +77,17 @@ fn basename_of(file_name: &str) -> &str {
 /// 存在しない / ディレクトリでない / 読み取れない場合は `Err` を返す。これを
 /// 各ファイル処理の前に呼ぶことで、対象・宛先が利用不可なら未着手で失敗させる。
 fn ensure_dir_accessible(dir: &Path, role: &str) -> AppResult<()> {
-    let meta = std::fs::metadata(dir).map_err(|e| {
-        AppError::from(e).with_path(dir.to_string_lossy().into_owned())
-    })?;
+    let meta = std::fs::metadata(dir)
+        .map_err(|e| AppError::from(e).with_path(dir.to_string_lossy().into_owned()))?;
     if !meta.is_dir() {
-        return Err(AppError::invalid_input(format!(
-            "{role}がフォルダではありません"
-        ))
-        .with_path(dir.to_string_lossy().into_owned()));
+        return Err(
+            AppError::invalid_input(format!("{role}がフォルダではありません"))
+                .with_path(dir.to_string_lossy().into_owned()),
+        );
     }
     // 読み取り可能性を read_dir で確認（権限不足はここで顕在化する）。
-    std::fs::read_dir(dir).map_err(|e| {
-        AppError::from(e).with_path(dir.to_string_lossy().into_owned())
-    })?;
+    std::fs::read_dir(dir)
+        .map_err(|e| AppError::from(e).with_path(dir.to_string_lossy().into_owned()))?;
     Ok(())
 }
 
@@ -474,7 +472,10 @@ mod tests {
         assert_eq!(report.skipped, 1);
         // 元ファイルは残る。
         assert!(exists(src.path(), "no_delimiter.png"));
-        assert!(report.messages.iter().any(|m| m.contains("no_delimiter.png")));
+        assert!(report
+            .messages
+            .iter()
+            .any(|m| m.contains("no_delimiter.png")));
     }
 
     #[test]
@@ -492,7 +493,10 @@ mod tests {
         assert_eq!(report.conflicted, 1);
         // 元は残り、宛先は上書きされていない。
         assert!(exists(src.path(), "img.png"));
-        assert_eq!(fs::read_to_string(dst.path().join("img.png")).unwrap(), "old");
+        assert_eq!(
+            fs::read_to_string(dst.path().join("img.png")).unwrap(),
+            "old"
+        );
         assert!(report.messages.iter().any(|m| m.contains("img.png")));
     }
 
@@ -505,7 +509,10 @@ mod tests {
         let result = sort_files(SortingOperation::Move, &missing, dst.path());
 
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().kind, crate::error::AppErrorKind::NotFound);
+        assert_eq!(
+            result.unwrap_err().kind,
+            crate::error::AppErrorKind::NotFound
+        );
     }
 
     #[test]
@@ -604,7 +611,10 @@ mod tests {
         assert_eq!(report.conflicted, 1);
         // 衝突ファイルは元に残り、既存宛先は上書きされていない。
         assert!(exists(src.path(), "dup.png"));
-        assert_eq!(fs::read_to_string(dst.path().join("dup.png")).unwrap(), "old");
+        assert_eq!(
+            fs::read_to_string(dst.path().join("dup.png")).unwrap(),
+            "old"
+        );
         // 非衝突ファイルは対で移動している。
         assert!(!exists(src.path(), "fresh.png"));
         assert!(exists(dst.path(), "fresh.png"));
@@ -632,7 +642,10 @@ mod tests {
         // 対は元に残り、既存 Tag_File は上書きされていない。
         assert!(exists(src.path(), "pair.png"));
         assert!(exists(src.path(), "pair.txt"));
-        assert_eq!(fs::read_to_string(dst.path().join("pair.txt")).unwrap(), "old");
+        assert_eq!(
+            fs::read_to_string(dst.path().join("pair.txt")).unwrap(),
+            "old"
+        );
         assert!(!exists(dst.path(), "pair.png"));
         // 非衝突は移動済み。
         assert!(exists(dst.path(), "other.png"));

@@ -57,7 +57,9 @@ const FORBIDDEN_CHARS: [char; 9] = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'
 /// ファイル名が OS 禁止文字を含む、または空である場合に `true`（要件 8.5）。
 fn has_forbidden_chars(name: &str) -> bool {
     name.is_empty()
-        || name.chars().any(|c| FORBIDDEN_CHARS.contains(&c) || c.is_control())
+        || name
+            .chars()
+            .any(|c| FORBIDDEN_CHARS.contains(&c) || c.is_control())
 }
 
 /// 拡張子（`.` 以降）が対応 Image 拡張子のいずれかか判定する（大小無視）。
@@ -460,9 +462,7 @@ mod tests {
 ///
 /// 戻り値の [`OperationReport`] は改名件数（`succeeded`）と衝突件数
 /// （`conflicted`）を持ち、結果表示に用いる（要件 4.3）。
-pub fn normalize_caption_filenames(
-    folder: impl AsRef<Path>,
-) -> AppResult<OperationReport> {
+pub fn normalize_caption_filenames(folder: impl AsRef<Path>) -> AppResult<OperationReport> {
     let folder = folder.as_ref();
 
     let read_dir = std::fs::read_dir(folder)

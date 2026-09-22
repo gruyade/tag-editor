@@ -13,7 +13,10 @@ use tag_editor_core::logic::inference_aux::exclude_videos;
 /// テスト側の独立実装。実装（`is_mp4`）と同じ規則を、テストのために
 /// 別ロジックで表現する（区切りは `/` と `\` の双方を考慮）。
 fn has_mp4_extension(path: &str) -> bool {
-    let file_name = path.rsplit(|c| c == '/' || c == '\\').next().unwrap_or(path);
+    let file_name = path
+        .rsplit(|c| c == '/' || c == '\\')
+        .next()
+        .unwrap_or(path);
     match file_name.rsplit_once('.') {
         Some((_, ext)) => ext.eq_ignore_ascii_case("mp4"),
         None => false,
@@ -28,8 +31,17 @@ fn has_mp4_extension(path: &str) -> bool {
 fn file_name_strategy() -> impl Strategy<Value = String> {
     // 名前本体（拡張子を除く部分）の候補。`mp4` を含む名前を混ぜる。
     let stem = prop::sample::select(vec![
-        "a", "image", "photo", "clip", "video", "mp4", "mp4_thumbnail", "my.mp4.backup",
-        "データ", "画像", "file name",
+        "a",
+        "image",
+        "photo",
+        "clip",
+        "video",
+        "mp4",
+        "mp4_thumbnail",
+        "my.mp4.backup",
+        "データ",
+        "画像",
+        "file name",
     ]);
     // 拡張子候補: mp4 系（大小混在）と非 mp4、および拡張子なし（None）。
     let ext = prop::sample::select(vec![
@@ -65,8 +77,7 @@ fn dir_prefix_strategy() -> impl Strategy<Value = String> {
 
 /// 単一パス生成器: ディレクトリ接頭辞 + ファイル名。
 fn path_strategy() -> impl Strategy<Value = String> {
-    (dir_prefix_strategy(), file_name_strategy())
-        .prop_map(|(dir, name)| format!("{dir}{name}"))
+    (dir_prefix_strategy(), file_name_strategy()).prop_map(|(dir, name)| format!("{dir}{name}"))
 }
 
 /// パス集合（列）の生成器。空列も含む。
