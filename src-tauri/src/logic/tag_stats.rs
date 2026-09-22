@@ -68,9 +68,7 @@ pub fn matches_filter(image_tags: &[String], include: &[String], exclude: &[Stri
         image_tags.iter().map(|t| normalize_key(t)).collect();
 
     // include: 指定タグをすべて含む（空なら vacuously true）。
-    let all_included = include
-        .iter()
-        .all(|t| tag_keys.contains(&normalize_key(t)));
+    let all_included = include.iter().all(|t| tag_keys.contains(&normalize_key(t)));
 
     // exclude: 指定タグのいずれも含まない（空なら vacuously true）。
     let none_excluded = exclude
@@ -98,13 +96,21 @@ mod matches_filter_tests {
     #[test]
     fn include_all_present_matches() {
         // 要件 6.5: 指定 include をすべて含む場合のみ真。
-        assert!(matches_filter(&v(&["cat", "dog", "sky"]), &v(&["cat", "dog"]), &[]));
+        assert!(matches_filter(
+            &v(&["cat", "dog", "sky"]),
+            &v(&["cat", "dog"]),
+            &[]
+        ));
     }
 
     #[test]
     fn include_missing_one_does_not_match() {
         // include の一部が欠けていれば偽。
-        assert!(!matches_filter(&v(&["cat", "sky"]), &v(&["cat", "dog"]), &[]));
+        assert!(!matches_filter(
+            &v(&["cat", "sky"]),
+            &v(&["cat", "dog"]),
+            &[]
+        ));
     }
 
     #[test]
@@ -177,19 +183,24 @@ mod aggregate_tags_tests {
 
     #[test]
     fn counts_occurrences_across_files() {
-        let files = vec![
-            vec!["cat", "dog", "cat"],
-            vec!["dog", "bird"],
-            vec!["cat"],
-        ];
+        let files = vec![vec!["cat", "dog", "cat"], vec!["dog", "bird"], vec!["cat"]];
         let result = aggregate_tags(files);
         // cat=3, dog=2, bird=1
         assert_eq!(
             result,
             vec![
-                TagCount { tag: "cat".into(), count: 3 },
-                TagCount { tag: "dog".into(), count: 2 },
-                TagCount { tag: "bird".into(), count: 1 },
+                TagCount {
+                    tag: "cat".into(),
+                    count: 3
+                },
+                TagCount {
+                    tag: "dog".into(),
+                    count: 2
+                },
+                TagCount {
+                    tag: "bird".into(),
+                    count: 1
+                },
             ]
         );
     }
@@ -215,10 +226,22 @@ mod aggregate_tags_tests {
         assert_eq!(
             result,
             vec![
-                TagCount { tag: "aaa".into(), count: 2 },
-                TagCount { tag: "mmm".into(), count: 2 },
-                TagCount { tag: "zzz".into(), count: 2 },
-                TagCount { tag: "top".into(), count: 1 },
+                TagCount {
+                    tag: "aaa".into(),
+                    count: 2
+                },
+                TagCount {
+                    tag: "mmm".into(),
+                    count: 2
+                },
+                TagCount {
+                    tag: "zzz".into(),
+                    count: 2
+                },
+                TagCount {
+                    tag: "top".into(),
+                    count: 1
+                },
             ]
         );
     }
@@ -231,8 +254,14 @@ mod aggregate_tags_tests {
         assert_eq!(
             result,
             vec![
-                TagCount { tag: "cat".into(), count: 2 },
-                TagCount { tag: "dog".into(), count: 1 },
+                TagCount {
+                    tag: "cat".into(),
+                    count: 2
+                },
+                TagCount {
+                    tag: "dog".into(),
+                    count: 1
+                },
             ]
         );
     }
@@ -246,9 +275,18 @@ mod aggregate_tags_tests {
         assert_eq!(
             result,
             vec![
-                TagCount { tag: "CAT".into(), count: 1 },
-                TagCount { tag: "Cat".into(), count: 1 },
-                TagCount { tag: "cat".into(), count: 1 },
+                TagCount {
+                    tag: "CAT".into(),
+                    count: 1
+                },
+                TagCount {
+                    tag: "Cat".into(),
+                    count: 1
+                },
+                TagCount {
+                    tag: "cat".into(),
+                    count: 1
+                },
             ]
         );
     }
@@ -272,8 +310,14 @@ mod aggregate_tags_tests {
         assert_eq!(
             result,
             vec![
-                TagCount { tag: "猫".into(), count: 3 },
-                TagCount { tag: "犬".into(), count: 1 },
+                TagCount {
+                    tag: "猫".into(),
+                    count: 3
+                },
+                TagCount {
+                    tag: "犬".into(),
+                    count: 1
+                },
             ]
         );
     }

@@ -229,9 +229,18 @@ mod normalize_caption_name_tests {
 
     #[test]
     fn double_extension_is_normalized() {
-        assert_eq!(normalize_caption_name("image.png.txt").as_deref(), Some("image.txt"));
-        assert_eq!(normalize_caption_name("photo.jpeg.txt").as_deref(), Some("photo.txt"));
-        assert_eq!(normalize_caption_name("clip.mp4.txt").as_deref(), Some("clip.txt"));
+        assert_eq!(
+            normalize_caption_name("image.png.txt").as_deref(),
+            Some("image.txt")
+        );
+        assert_eq!(
+            normalize_caption_name("photo.jpeg.txt").as_deref(),
+            Some("photo.txt")
+        );
+        assert_eq!(
+            normalize_caption_name("clip.mp4.txt").as_deref(),
+            Some("clip.txt")
+        );
     }
 
     #[test]
@@ -251,8 +260,14 @@ mod normalize_caption_name_tests {
     #[test]
     fn txt_suffix_is_case_insensitive() {
         // 末尾 .TXT / .Txt も .txt として扱い、小文字 .txt へ揃える。
-        assert_eq!(normalize_caption_name("image.png.TXT").as_deref(), Some("image.txt"));
-        assert_eq!(normalize_caption_name("image.PNG.Txt").as_deref(), Some("image.txt"));
+        assert_eq!(
+            normalize_caption_name("image.png.TXT").as_deref(),
+            Some("image.txt")
+        );
+        assert_eq!(
+            normalize_caption_name("image.PNG.Txt").as_deref(),
+            Some("image.txt")
+        );
     }
 
     #[test]
@@ -330,7 +345,10 @@ mod numbering_tests {
 
     #[test]
     fn expand_num_placeholder_without_placeholder() {
-        assert_eq!(expand_num_placeholder("no_placeholder", 7, 3), "no_placeholder");
+        assert_eq!(
+            expand_num_placeholder("no_placeholder", 7, 3),
+            "no_placeholder"
+        );
         assert_eq!(expand_num_placeholder("", 7, 3), "");
     }
 
@@ -407,8 +425,8 @@ mod gather_distribute_tests {
         ];
         for (subfolder, file_name) in cases {
             let gathered = gather_name(subfolder, file_name);
-            let (prefix, original) = split_gathered_name(&gathered)
-                .expect("gather した名前は分解できる");
+            let (prefix, original) =
+                split_gathered_name(&gathered).expect("gather した名前は分解できる");
             assert_eq!(prefix, subfolder);
             assert_eq!(original, file_name);
         }

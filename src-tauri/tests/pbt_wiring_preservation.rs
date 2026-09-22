@@ -63,15 +63,14 @@ impl SessionRunner for MockRunner {
 /// 旧 `threshold: f32` フィールドと等価な採用挙動を得るため、他フィールドは
 /// 空、fraction_threshold は 0（非適用）にする。
 fn threshold_filter(threshold: f32) -> TagFilter {
-    let (filter, _invalid) =
-        tag_editor_core::logic::tag_filter::compile_filter(RawTagFilter {
-            keep: Vec::new(),
-            exclude: Vec::new(),
-            replace: Vec::new(),
-            additional: Vec::new(),
-            confidence_threshold: threshold,
-            fraction_threshold: 0.0,
-        });
+    let (filter, _invalid) = tag_editor_core::logic::tag_filter::compile_filter(RawTagFilter {
+        keep: Vec::new(),
+        exclude: Vec::new(),
+        replace: Vec::new(),
+        additional: Vec::new(),
+        confidence_threshold: threshold,
+        fraction_threshold: 0.0,
+    });
     filter
 }
 
@@ -386,7 +385,8 @@ fn preserve_find_orphan_captions_command_lists_orphans() {
     std::fs::write(dir.path().join("paired.png"), b"").unwrap();
     std::fs::write(dir.path().join("paired.txt"), b"tags").unwrap();
 
-    let orphans = adapters::find_orphan_captions(dir.path().to_string_lossy().into_owned()).unwrap();
+    let orphans =
+        adapters::find_orphan_captions(dir.path().to_string_lossy().into_owned()).unwrap();
     assert_eq!(orphans.len(), 1);
     assert!(orphans[0].ends_with("orphan.txt"));
 }
@@ -403,11 +403,8 @@ fn preserve_capabilities_command_matches_cfg_windows() {
 #[test]
 fn preserve_convert_path_command_delegates_and_errors() {
     // 正常系: Win→Linux。
-    let out = adapters::convert_path(
-        "C:\\foo\\bar".to_string(),
-        ConvertDirection::WindowsToLinux,
-    )
-    .unwrap();
+    let out = adapters::convert_path("C:\\foo\\bar".to_string(), ConvertDirection::WindowsToLinux)
+        .unwrap();
     assert_eq!(out, "/mnt/c/foo/bar");
     // サービス層直呼びとも一致。
     assert_eq!(
@@ -416,11 +413,8 @@ fn preserve_convert_path_command_delegates_and_errors() {
     );
 
     // 異常系: 変換規則に適合しない入力は InvalidInput。
-    let err = adapters::convert_path(
-        "foo\\bar".to_string(),
-        ConvertDirection::WindowsToLinux,
-    )
-    .unwrap_err();
+    let err = adapters::convert_path("foo\\bar".to_string(), ConvertDirection::WindowsToLinux)
+        .unwrap_err();
     assert_eq!(err.kind, AppErrorKind::InvalidInput);
 }
 
@@ -606,8 +600,7 @@ fn preserve_corrupt_image_yields_placeholder_thumbnail_and_preview() {
     let broken = dir.path().join("broken.png");
     std::fs::write(&broken, b"this is definitely not an image").unwrap();
 
-    let thumb =
-        adapters::get_thumbnail(broken.to_string_lossy().into_owned(), 128).unwrap();
+    let thumb = adapters::get_thumbnail(broken.to_string_lossy().into_owned(), 128).unwrap();
     assert!(thumb.placeholder);
     assert!(thumb.png.is_empty());
     assert_eq!(thumb.width, 0);
@@ -629,12 +622,10 @@ fn preserve_broken_item_does_not_affect_sibling_valid_image() {
     std::fs::write(&broken, b"not an image").unwrap();
     let valid = write_png(dir.path(), "valid.png", 300, 150);
 
-    let broken_thumb =
-        adapters::get_thumbnail(broken.to_string_lossy().into_owned(), 128).unwrap();
+    let broken_thumb = adapters::get_thumbnail(broken.to_string_lossy().into_owned(), 128).unwrap();
     assert!(broken_thumb.placeholder);
 
-    let valid_thumb =
-        adapters::get_thumbnail(valid.to_string_lossy().into_owned(), 128).unwrap();
+    let valid_thumb = adapters::get_thumbnail(valid.to_string_lossy().into_owned(), 128).unwrap();
     assert!(!valid_thumb.placeholder);
     assert!(!valid_thumb.png.is_empty());
     // 300x150 を 128 内接 → 128x64。

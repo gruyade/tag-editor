@@ -29,9 +29,25 @@ use tag_editor_core::services::tag_file::{read_tag_file, write_tag_file};
 /// 幅広い Unicode スカラ値と重要文字の双方を網羅する。
 fn content_strategy() -> impl Strategy<Value = String> {
     let special = prop::sample::select(vec![
-        'a', 'Z', '0', '9', ' ', '_', '-', '.', // ASCII
-        ',', '\n', '\r', '\t', // 区切り・制御
-        '猫', '髪', 'あ', '한', '🎨', '🐈', '\u{1F600}', // マルチバイト
+        'a',
+        'Z',
+        '0',
+        '9',
+        ' ',
+        '_',
+        '-',
+        '.', // ASCII
+        ',',
+        '\n',
+        '\r',
+        '\t', // 区切り・制御
+        '猫',
+        '髪',
+        'あ',
+        '한',
+        '🎨',
+        '🐈',
+        '\u{1F600}', // マルチバイト
     ]);
     // 特殊文字プールと任意の Unicode スカラ値を混ぜる。
     let mixed = prop_oneof![special, prop::char::any()];

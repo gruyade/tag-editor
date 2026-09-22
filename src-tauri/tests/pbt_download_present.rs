@@ -52,12 +52,7 @@ impl MockDownloader {
 }
 
 impl ModelDownloader for MockDownloader {
-    fn fetch(
-        &self,
-        _repo: &str,
-        file: &str,
-        _timeout: Duration,
-    ) -> Result<Vec<u8>, DownloadError> {
+    fn fetch(&self, _repo: &str, file: &str, _timeout: Duration) -> Result<Vec<u8>, DownloadError> {
         match self.responses.get(file) {
             Some(bytes) => Ok(bytes.clone()),
             None => Err(DownloadError::Other(format!("未登録のファイル: {file}"))),

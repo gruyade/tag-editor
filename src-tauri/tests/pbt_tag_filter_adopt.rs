@@ -46,19 +46,16 @@ fn confidence_strategy() -> impl Strategy<Value = Option<f32>> {
         Just(None),
         Just(Some(0.0f32)),
         Just(Some(1.0f32)),
-        Just(Some(THRESHOLD)),          // 閾値ちょうど（inclusive で採用）
-        Just(Some(THRESHOLD - 0.001)),  // 閾値直下（Discarded）
-        Just(Some(THRESHOLD + 0.001)),  // 閾値直上（採用）
+        Just(Some(THRESHOLD)),         // 閾値ちょうど（inclusive で採用）
+        Just(Some(THRESHOLD - 0.001)), // 閾値直下（Discarded）
+        Just(Some(THRESHOLD + 0.001)), // 閾値直上（採用）
         (0.0f32..=1.0f32).prop_map(Some),
     ]
 }
 
 /// 非 Keep タグ 1 件のジェネレータ。keep には決して入れないタグ集合を生成する。
 fn tag_strategy() -> impl Strategy<Value = Tag> {
-    (body_strategy(), confidence_strategy()).prop_map(|(body, confidence)| Tag {
-        body,
-        confidence,
-    })
+    (body_strategy(), confidence_strategy()).prop_map(|(body, confidence)| Tag { body, confidence })
 }
 
 /// Predicted_Tag 列（空集合を含む 0..=6 件）。

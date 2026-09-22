@@ -39,20 +39,28 @@ fn dim_strategy() -> impl Strategy<Value = u32> {
 
 /// 閾値のジェネレータ。妥当範囲 1..=100_000 と境界をカバーする。
 fn threshold_strategy() -> impl Strategy<Value = u32> {
-    prop_oneof![
-        Just(1_u32),
-        Just(100_000_u32),
-        1_u32..=100_000,
-    ]
+    prop_oneof![Just(1_u32), Just(100_000_u32), 1_u32..=100_000,]
 }
 
 /// 4 つの宛先を列挙する（結果がこのちょうど 1 つに一致することの確認に用いる）。
 fn all_destinations() -> [SizeDestination; 4] {
     [
-        SizeDestination { orientation: Orientation::Landscape, band: LongSideBand::AtOrAbove },
-        SizeDestination { orientation: Orientation::Landscape, band: LongSideBand::Below },
-        SizeDestination { orientation: Orientation::Portrait, band: LongSideBand::AtOrAbove },
-        SizeDestination { orientation: Orientation::Portrait, band: LongSideBand::Below },
+        SizeDestination {
+            orientation: Orientation::Landscape,
+            band: LongSideBand::AtOrAbove,
+        },
+        SizeDestination {
+            orientation: Orientation::Landscape,
+            band: LongSideBand::Below,
+        },
+        SizeDestination {
+            orientation: Orientation::Portrait,
+            band: LongSideBand::AtOrAbove,
+        },
+        SizeDestination {
+            orientation: Orientation::Portrait,
+            band: LongSideBand::Below,
+        },
     ]
 }
 
@@ -105,10 +113,7 @@ fn check(width: u32, height: u32, threshold: u32) -> Result<(), TestCaseError> {
     );
 
     // --- 一意性: 結果は 4 宛先のちょうど 1 つに一致する ---
-    let matches = all_destinations()
-        .iter()
-        .filter(|d| **d == result)
-        .count();
+    let matches = all_destinations().iter().filter(|d| **d == result).count();
     prop_assert_eq!(
         matches,
         1,

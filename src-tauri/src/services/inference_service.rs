@@ -2,7 +2,7 @@
 //!
 //! 本モジュールは推論エンジンの中核を 2 段に分けて提供する。
 //!
-//! 1. [`preprocess_image`]: 画像を入力サイズの正方形へリサイズし、チャンネル順
+//! 1. [`preprocess_image`][]: 画像を入力サイズの正方形へリサイズし、チャンネル順
 //!    （BGR/RGB、モデルメタから解決）に従って画素値を並べた `f32` テンソルを
 //!    生成する純粋関数。実 ONNX ランタイムを一切必要とせず単体テスト可能。
 //! 2. 推論グルー（[`infer_confidences`] / [`run_labeled_inference`]）: 前処理済み
@@ -134,7 +134,11 @@ pub fn map_confidences_to_tags(labels: &[LabelDef], confidences: &[f32]) -> AppR
         .iter()
         .zip(confidences.iter())
         .map(|(label, &conf)| {
-            let clamped = if conf.is_nan() { 0.0 } else { conf.clamp(0.0, 1.0) };
+            let clamped = if conf.is_nan() {
+                0.0
+            } else {
+                conf.clamp(0.0, 1.0)
+            };
             Tag::with_confidence(label.name.clone(), clamped)
         })
         .collect();
@@ -515,8 +519,15 @@ mod inference_mapping_tests {
         let runner = MockRunner {
             output: vec![0.2, 0.8],
         };
-        let result = infer_image(&runner, "C:/imgs/a.png", &img, 4, ChannelOrder::Bgr, &labels)
-            .unwrap();
+        let result = infer_image(
+            &runner,
+            "C:/imgs/a.png",
+            &img,
+            4,
+            ChannelOrder::Bgr,
+            &labels,
+        )
+        .unwrap();
         assert_eq!(result.image_path, "C:/imgs/a.png");
         assert_eq!(result.tags.len(), labels.len());
     }
@@ -983,9 +994,7 @@ mod run_inference_tests {
             paths.push(p.to_string_lossy().into_owned());
         }
 
-        let runner = MockRunner {
-            output: vec![0.9],
-        };
+        let runner = MockRunner { output: vec![0.9] };
         let labels = labels(&["a"]);
         // 最初のバッチ処理後にキャンセルを立てる。
         let cancel = AtomicBool::new(false);
@@ -1032,9 +1041,7 @@ mod run_inference_tests {
         std::fs::write(&mp4, b"x").unwrap();
         paths.push(mp4.to_string_lossy().into_owned());
 
-        let runner = MockRunner {
-            output: vec![0.9],
-        };
+        let runner = MockRunner { output: vec![0.9] };
         let labels = labels(&["a"]);
         let cancel = AtomicBool::new(false);
 
@@ -1184,9 +1191,7 @@ mod run_inference_tests {
             paths.push(p.to_string_lossy().into_owned());
         }
 
-        let runner = MockRunner {
-            output: vec![0.9],
-        };
+        let runner = MockRunner { output: vec![0.9] };
         let labels = labels(&["a"]);
         let cancel = AtomicBool::new(false);
         // 最初のバッチ（2 件）を処理し終えたところでキャンセルを立てる。
@@ -1235,9 +1240,7 @@ mod run_inference_tests {
             paths.push(p.to_string_lossy().into_owned());
         }
 
-        let runner = MockRunner {
-            output: vec![0.9],
-        };
+        let runner = MockRunner { output: vec![0.9] };
         let labels = labels(&["a"]);
         // 開始前からキャンセル要求済み。
         let cancel = AtomicBool::new(true);

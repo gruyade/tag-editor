@@ -67,12 +67,7 @@ fn check_cap(n: usize) -> Result<(), TestCaseError> {
         MAX_LISTING
     );
     // total == N（上限適用前の総数）
-    prop_assert_eq!(
-        listing.total,
-        n,
-        "total が N と不一致: N={}",
-        n
-    );
+    prop_assert_eq!(listing.total, n, "total が N と不一致: N={}", n);
     // truncated == (N > MAX_LISTING)
     prop_assert_eq!(
         listing.truncated,

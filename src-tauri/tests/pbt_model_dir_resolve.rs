@@ -34,9 +34,9 @@ fn base_dir_strategy() -> impl Strategy<Value = PathBuf> {
     .prop_map(|v| v.into_iter().collect::<String>());
 
     (
-        any::<bool>(),                               // 絶対パスにするか
-        prop::collection::vec(component, 0..5),      // 中間コンポーネント
-        any::<bool>(),                               // 末尾区切りを付けるか
+        any::<bool>(),                          // 絶対パスにするか
+        prop::collection::vec(component, 0..5), // 中間コンポーネント
+        any::<bool>(),                          // 末尾区切りを付けるか
     )
         .prop_map(|(absolute, components, trailing_sep)| {
             let mut s = String::new();

@@ -202,8 +202,7 @@ fn representative_onnx_fetch_failure_keeps_pair() {
         error: DownloadError::Timeout,
     };
     let cancel = AtomicBool::new(false);
-    let err = download_variant(&downloader, &variant, &variant_dir, &cancel, |_| {})
-        .unwrap_err();
+    let err = download_variant(&downloader, &variant, &variant_dir, &cancel, |_| {}).unwrap_err();
     assert_eq!(err.kind, tag_editor_core::error::AppErrorKind::Download);
 
     assert!(is_present(&variant_dir));
@@ -238,8 +237,7 @@ fn representative_tagdef_fetch_failure_keeps_pair() {
         error: DownloadError::Other("network down".to_string()),
     };
     let cancel = AtomicBool::new(false);
-    let err = download_variant(&downloader, &variant, &variant_dir, &cancel, |_| {})
-        .unwrap_err();
+    let err = download_variant(&downloader, &variant, &variant_dir, &cancel, |_| {}).unwrap_err();
     assert_eq!(err.kind, tag_editor_core::error::AppErrorKind::Download);
 
     // onnx 取得は成功したが保存段へ到達していないため既存は無傷。

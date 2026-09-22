@@ -31,21 +31,12 @@ use tag_editor_core::logic::naming::{
 
 /// 割り当て件数のジェネレータ。境界 1 と複数件をカバーする。
 fn count_strategy() -> impl Strategy<Value = u64> {
-    prop_oneof![
-        Just(1_u64),
-        Just(2_u64),
-        1_u64..=64,
-    ]
+    prop_oneof![Just(1_u64), Just(2_u64), 1_u64..=64,]
 }
 
 /// 桁数のジェネレータ。境界 0 / 1 と大きめの桁をカバーする。
 fn width_strategy() -> impl Strategy<Value = usize> {
-    prop_oneof![
-        Just(0_usize),
-        Just(1_usize),
-        Just(12_usize),
-        0_usize..=12,
-    ]
+    prop_oneof![Just(0_usize), Just(1_usize), Just(12_usize), 0_usize..=12,]
 }
 
 proptest! {

@@ -95,11 +95,7 @@ fn exempt_strategy() -> impl Strategy<Value = HashSet<String>> {
 
 /// 割合適用のみを設定した TagFilter を組み立てる。
 /// TagFilter は serde 非導出だがフィールドを直接埋めて構築できる。
-fn filter_with(
-    fraction: f32,
-    keep: &HashSet<String>,
-    additional: &HashSet<String>,
-) -> TagFilter {
+fn filter_with(fraction: f32, keep: &HashSet<String>, additional: &HashSet<String>) -> TagFilter {
     TagFilter {
         keep: keep.clone(),
         exclude: vec![],

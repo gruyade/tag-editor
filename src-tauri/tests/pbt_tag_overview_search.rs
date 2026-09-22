@@ -25,13 +25,13 @@ fn tag_name() -> impl Strategy<Value = String> {
 
 /// 1 TagStat。
 fn any_stat() -> impl Strategy<Value = TagStat> {
-    (tag_name(), 0.0f32..=1.0, 0usize..10).prop_map(|(name, representative_confidence, image_count)| {
-        TagStat {
+    (tag_name(), 0.0f32..=1.0, 0usize..10).prop_map(
+        |(name, representative_confidence, image_count)| TagStat {
             name,
             representative_confidence,
             image_count,
-        }
-    })
+        },
+    )
 }
 
 /// TagOverview（adopted / discarded を独立生成）。
@@ -48,7 +48,8 @@ fn query() -> impl Strategy<Value = String> {
     prop_oneof![
         Just(String::new()),
         Just("   ".to_string()),
-        prop::sample::select(vec!["ca", "DO", "ish", "aBc", "  Bird  ", "z"]).prop_map(String::from),
+        prop::sample::select(vec!["ca", "DO", "ish", "aBc", "  Bird  ", "z"])
+            .prop_map(String::from),
         prop::sample::select(vec!["猫", "ネコ", "CAFÉ", "ß", "жук"]).prop_map(String::from),
     ]
 }

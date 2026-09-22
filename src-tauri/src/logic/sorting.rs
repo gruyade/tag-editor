@@ -208,23 +208,40 @@ mod size_destination_tests {
 
         assert_eq!(
             landscape_above,
-            SizeDestination { orientation: Orientation::Landscape, band: LongSideBand::AtOrAbove }
+            SizeDestination {
+                orientation: Orientation::Landscape,
+                band: LongSideBand::AtOrAbove
+            }
         );
         assert_eq!(
             landscape_below,
-            SizeDestination { orientation: Orientation::Landscape, band: LongSideBand::Below }
+            SizeDestination {
+                orientation: Orientation::Landscape,
+                band: LongSideBand::Below
+            }
         );
         assert_eq!(
             portrait_above,
-            SizeDestination { orientation: Orientation::Portrait, band: LongSideBand::AtOrAbove }
+            SizeDestination {
+                orientation: Orientation::Portrait,
+                band: LongSideBand::AtOrAbove
+            }
         );
         assert_eq!(
             portrait_below,
-            SizeDestination { orientation: Orientation::Portrait, band: LongSideBand::Below }
+            SizeDestination {
+                orientation: Orientation::Portrait,
+                band: LongSideBand::Below
+            }
         );
 
         // 4 宛先はすべて相異なる。
-        let all = [landscape_above, landscape_below, portrait_above, portrait_below];
+        let all = [
+            landscape_above,
+            landscape_below,
+            portrait_above,
+            portrait_below,
+        ];
         for i in 0..all.len() {
             for j in (i + 1)..all.len() {
                 assert_ne!(all[i], all[j]);

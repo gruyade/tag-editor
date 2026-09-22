@@ -57,9 +57,9 @@ fn tag_strategy() -> impl Strategy<Value = String> {
         Just("Long Hair"),
         Just("1girl"),
         Just("solo"),
-        Just("笑顔"),      // マルチバイト
-        Just("赤い髪"),    // マルチバイト
-        Just(""),          // トリム後に空になり得る（空白のみタグ相当）
+        Just("笑顔"),   // マルチバイト
+        Just("赤い髪"), // マルチバイト
+        Just(""),       // トリム後に空になり得る（空白のみタグ相当）
     ];
     (
         body,
@@ -68,7 +68,11 @@ fn tag_strategy() -> impl Strategy<Value = String> {
         prop_oneof![Just(""), Just(" "), Just("\t"), Just("  ")],
     )
         .prop_map(|(body, upper, lead, trail)| {
-            let core = if upper { body.to_uppercase() } else { body.to_string() };
+            let core = if upper {
+                body.to_uppercase()
+            } else {
+                body.to_string()
+            };
             format!("{lead}{core}{trail}")
         })
 }

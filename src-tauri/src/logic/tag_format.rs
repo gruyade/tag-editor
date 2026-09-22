@@ -193,10 +193,7 @@ mod tests {
 
     #[test]
     fn render_tags_off_shows_body_only() {
-        let tags = vec![
-            Tag::with_confidence("smile", 0.9),
-            Tag::new("solo"),
-        ];
+        let tags = vec![Tag::with_confidence("smile", 0.9), Tag::new("solo")];
         assert_eq!(render_tags(&tags, false), "smile, solo");
     }
 

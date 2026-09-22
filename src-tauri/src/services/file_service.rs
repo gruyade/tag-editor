@@ -67,9 +67,8 @@ pub fn list_images(folder: impl AsRef<Path>) -> AppResult<ImageListing> {
     // フォルダとして読み取れない場合はエラー（要件 1.8）。
     // read_dir はファイル・不存在・権限不足を io::Error として返し、
     // From<io::Error> により適切な AppError 種別へ変換される。
-    let read_dir = std::fs::read_dir(folder).map_err(|e| {
-        AppError::from(e).with_path(folder.to_string_lossy().into_owned())
-    })?;
+    let read_dir = std::fs::read_dir(folder)
+        .map_err(|e| AppError::from(e).with_path(folder.to_string_lossy().into_owned()))?;
 
     // 直下のファイルのみ対象。サブディレクトリ・読み取り不能なエントリは除外。
     let mut file_names: Vec<String> = Vec::new();

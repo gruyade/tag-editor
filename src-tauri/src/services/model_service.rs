@@ -106,18 +106,20 @@ fn builtin_candidates() -> Vec<ModelVariant> {
         ),
     ];
 
-    variants.extend(ml_danbooru.into_iter().map(|(id, display, onnx)| {
-        ModelVariant {
-            id: id.to_string(),
-            display_name: display.to_string(),
-            family: ModelFamily::MlDanbooru,
-            source: ModelSource {
-                repo: ML_DANBOORU_REPO.to_string(),
-                onnx_file: onnx.to_string(),
-                tag_files: vec!["tags.csv".to_string(), "tags.json".to_string()],
-            },
-        }
-    }));
+    variants.extend(
+        ml_danbooru
+            .into_iter()
+            .map(|(id, display, onnx)| ModelVariant {
+                id: id.to_string(),
+                display_name: display.to_string(),
+                family: ModelFamily::MlDanbooru,
+                source: ModelSource {
+                    repo: ML_DANBOORU_REPO.to_string(),
+                    onnx_file: onnx.to_string(),
+                    tag_files: vec!["tags.csv".to_string(), "tags.json".to_string()],
+                },
+            }),
+    );
 
     variants
 }
@@ -140,9 +142,7 @@ fn builtin_candidates() -> Vec<ModelVariant> {
 /// - 第 2 要素: 除外集合（必須フィールド欠落/空。除外理由の提示に用いる、要件 1.4）。
 ///
 /// 登録集合と除外集合の和は入力候補全体に一致する（Property 2）。
-pub fn validate_catalog(
-    candidates: Vec<ModelVariant>,
-) -> (Vec<ModelVariant>, Vec<ModelVariant>) {
+pub fn validate_catalog(candidates: Vec<ModelVariant>) -> (Vec<ModelVariant>, Vec<ModelVariant>) {
     let mut registered: Vec<ModelVariant> = Vec::new();
     let mut excluded: Vec<ModelVariant> = Vec::new();
     let mut used_ids: HashSet<String> = HashSet::new();
@@ -245,8 +245,7 @@ mod catalog_tests {
         assert!(wd14.len() >= 2, "WD14 系は複数バリアントを含むべき");
         // WD14 系は model.onnx / selected_tags.csv を持つ。
         assert!(wd14.iter().all(|v| v.source.onnx_file == "model.onnx"
-            && v
-                .source
+            && v.source
                 .tag_files
                 .contains(&"selected_tags.csv".to_string())));
 
@@ -262,8 +261,7 @@ mod catalog_tests {
         // 同一リポジトリで onnx_file が相異なる。
         let repos: HashSet<&str> = mld.iter().map(|v| v.source.repo.as_str()).collect();
         assert_eq!(repos.len(), 1, "ML-Danbooru は単一リポジトリのはず");
-        let onnx_files: HashSet<&str> =
-            mld.iter().map(|v| v.source.onnx_file.as_str()).collect();
+        let onnx_files: HashSet<&str> = mld.iter().map(|v| v.source.onnx_file.as_str()).collect();
         assert_eq!(onnx_files.len(), mld.len(), "各 .onnx は相異なるべき");
     }
 
@@ -284,7 +282,13 @@ mod catalog_tests {
         let candidates = vec![
             candidate("ok", "OK", ModelFamily::Wd14, "repo/ok", "model.onnx"),
             candidate("", "空 id", ModelFamily::Wd14, "repo/x", "model.onnx"),
-            candidate("empty-name", "  ", ModelFamily::Wd14, "repo/y", "model.onnx"),
+            candidate(
+                "empty-name",
+                "  ",
+                ModelFamily::Wd14,
+                "repo/y",
+                "model.onnx",
+            ),
         ];
         let total = candidates.len();
         let (registered, excluded) = validate_catalog(candidates);
@@ -421,9 +425,7 @@ pub fn parse_tag_definition(path: &Path) -> AppResult<Vec<LabelDef>> {
         // 拡張子不明でも内容から JSON/CSV を推測せず、CSV として解釈を試みる。
         _ => parse_tag_definition_csv(&content),
     }
-    .map_err(|msg| {
-        AppError::model_load(msg).with_path(path.to_string_lossy().into_owned())
-    })?;
+    .map_err(|msg| AppError::model_load(msg).with_path(path.to_string_lossy().into_owned()))?;
 
     if labels.is_empty() {
         return Err(AppError::model_load("タグ定義に有効なラベルがありません")
@@ -522,8 +524,8 @@ fn parse_tag_definition_csv(content: &str) -> Result<Vec<LabelDef>, String> {
 /// 文字列配列（全て general）とオブジェクト配列（`name` 必須, `category` 任意）の
 /// いずれも受理する。混在も許容する。
 fn parse_tag_definition_json(content: &str) -> Result<Vec<LabelDef>, String> {
-    let value: serde_json::Value = serde_json::from_str(content)
-        .map_err(|e| format!("JSON を解析できません: {e}"))?;
+    let value: serde_json::Value =
+        serde_json::from_str(content).map_err(|e| format!("JSON を解析できません: {e}"))?;
 
     let array = value
         .as_array()
@@ -552,9 +554,7 @@ fn parse_tag_definition_json(content: &str) -> Result<Vec<LabelDef>, String> {
                 }
                 let category = match map.get("category") {
                     Some(serde_json::Value::String(s)) => category_from_token(s),
-                    Some(serde_json::Value::Number(n)) => {
-                        category_from_token(&n.to_string())
-                    }
+                    Some(serde_json::Value::Number(n)) => category_from_token(&n.to_string()),
                     _ => TagCategory::General,
                 };
                 labels.push(LabelDef {
@@ -588,10 +588,8 @@ fn parse_tag_definition_json(content: &str) -> Result<Vec<LabelDef>, String> {
 pub fn load_variant(variant_dir: &Path) -> AppResult<LoadedModel> {
     // 1) `.onnx` とタグ定義の対を検出する（対が無ければ要件 8.2 のエラー）。
     let onnx_path = onnx_with_tagdef(variant_dir).ok_or_else(|| {
-        AppError::model_load(
-            "モデルディレクトリに .onnx とタグ定義（.csv/.json）の対がありません",
-        )
-        .with_path(variant_dir.to_string_lossy().into_owned())
+        AppError::model_load("モデルディレクトリに .onnx とタグ定義（.csv/.json）の対がありません")
+            .with_path(variant_dir.to_string_lossy().into_owned())
     })?;
 
     // 2) タグ定義ファイルを特定して解析する（欠落/不正は要件 8.3 のエラー）。
@@ -778,8 +776,11 @@ mod load_variant_tests {
     fn missing_onnx_yields_model_load_error() {
         // タグ定義はあるが .onnx が無い → 要件 8.2 のエラー。
         let dir = tempdir().unwrap();
-        fs::write(dir.path().join("selected_tags.csv"), b"tag_id,name,category\n1,solo,0\n")
-            .unwrap();
+        fs::write(
+            dir.path().join("selected_tags.csv"),
+            b"tag_id,name,category\n1,solo,0\n",
+        )
+        .unwrap();
 
         let err = load_variant(dir.path()).unwrap_err();
         assert_eq!(err.kind, crate::error::AppErrorKind::ModelLoad);
@@ -891,12 +892,7 @@ impl std::fmt::Display for DownloadError {
 /// 依存するため、単体テストではモック実装へ差し替える（設計方針）。
 pub trait ModelDownloader {
     /// `repo` 内の `file` を取得する。`timeout` 超過時は [`DownloadError::Timeout`]。
-    fn fetch(
-        &self,
-        repo: &str,
-        file: &str,
-        timeout: Duration,
-    ) -> Result<Vec<u8>, DownloadError>;
+    fn fetch(&self, repo: &str, file: &str, timeout: Duration) -> Result<Vec<u8>, DownloadError>;
 }
 
 /// [`download_variant`] が取得段階の境界で通知する進捗フェーズ。
@@ -980,7 +976,9 @@ where
     let was_present = is_present(variant_dir);
 
     if cancel.load(Ordering::SeqCst) {
-        return Err(AppError::cancelled("モデルダウンロードがキャンセルされました"));
+        return Err(AppError::cancelled(
+            "モデルダウンロードがキャンセルされました",
+        ));
     }
 
     // variant_dir を用意する。作成失敗（親が無い・権限不足など）は保存失敗。
@@ -995,7 +993,9 @@ where
 
     if cancel.load(Ordering::SeqCst) {
         // 取得段のキャンセル: まだ保存していないので既存 Assets には触れていない。
-        return Err(AppError::cancelled("モデルダウンロードがキャンセルされました"));
+        return Err(AppError::cancelled(
+            "モデルダウンロードがキャンセルされました",
+        ));
     }
 
     // 2) タグ定義を source.tag_files の順に取得する。最初に成功した候補名で保存する。
@@ -1026,7 +1026,10 @@ where
             ));
             return Err(download_error(
                 repo,
-                candidates.first().map(|s| s.as_str()).unwrap_or("tag-definition"),
+                candidates
+                    .first()
+                    .map(|s| s.as_str())
+                    .unwrap_or("tag-definition"),
                 &e,
             ));
         }
@@ -1034,7 +1037,9 @@ where
     on_progress(DownloadPhase::TagDefinitionFetched);
 
     if cancel.load(Ordering::SeqCst) {
-        return Err(AppError::cancelled("モデルダウンロードがキャンセルされました"));
+        return Err(AppError::cancelled(
+            "モデルダウンロードがキャンセルされました",
+        ));
     }
 
     // 3) 保存先ファイル名を決める。onnx は source.onnx_file のベース名（拡張子 .onnx）。
@@ -1198,9 +1203,8 @@ fn fetch_with_retry<D: ModelDownloader>(
 fn atomic_write(dest: &Path, bytes: &[u8]) -> AppResult<()> {
     use std::io::Write;
 
-    let map_io = |e: std::io::Error| {
-        AppError::from(e).with_path(dest.to_string_lossy().into_owned())
-    };
+    let map_io =
+        |e: std::io::Error| AppError::from(e).with_path(dest.to_string_lossy().into_owned());
 
     let file_name = dest
         .file_name()
@@ -1252,12 +1256,7 @@ impl HfHubDownloader {
 }
 
 impl ModelDownloader for HfHubDownloader {
-    fn fetch(
-        &self,
-        repo: &str,
-        file: &str,
-        _timeout: Duration,
-    ) -> Result<Vec<u8>, DownloadError> {
+    fn fetch(&self, repo: &str, file: &str, _timeout: Duration) -> Result<Vec<u8>, DownloadError> {
         // hf-hub 0.4 の同期 API（`ureq` feature）を用いる。`get` はキャッシュへ
         // ダウンロードしローカルパスを返す。タイムアウトの厳密制御は hf-hub の
         // 設定に委ねる（本ラッパは薄く保つ）。
@@ -1386,7 +1385,10 @@ pub(crate) mod download_model_tests {
         let tagdef = dest.join("selected_tags.csv");
         assert!(onnx.is_file(), "model.onnx が保存されるべき");
         assert!(tagdef.is_file(), "タグ定義が保存されるべき");
-        assert_eq!(std::fs::read(&onnx).unwrap(), b"not-a-real-onnx-but-saved-verbatim");
+        assert_eq!(
+            std::fs::read(&onnx).unwrap(),
+            b"not-a-real-onnx-but-saved-verbatim"
+        );
 
         // 保存したタグ定義は load_variant の解析段（parse_tag_definition）が読める。
         let labels = parse_tag_definition(&tagdef).unwrap();
@@ -1433,10 +1435,8 @@ pub(crate) mod download_model_tests {
     fn tag_files_fallback_to_second_candidate() {
         // tag_files の先頭が取得できない場合、2 番目の候補にフォールバックする。
         let json = br#"["solo","1girl"]"#;
-        let downloader = MockDownloader::with_responses(&[
-            ("model.onnx", b"onnx-bytes"),
-            ("tags.json", json),
-        ]);
+        let downloader =
+            MockDownloader::with_responses(&[("model.onnx", b"onnx-bytes"), ("tags.json", json)]);
         let variant = ModelVariant {
             id: "ml-danbooru".to_string(),
             display_name: "ML-Danbooru".to_string(),
@@ -1522,10 +1522,8 @@ pub(crate) mod download_model_tests {
         // variant_dir としてファイル（ディレクトリではない）を指定すると、
         // create_dir_all または書込が失敗する（保存失敗）。
         let csv = b"tag_id,name,category\n1,solo,0\n";
-        let downloader = MockDownloader::with_responses(&[
-            ("model.onnx", b"onnx"),
-            ("selected_tags.csv", csv),
-        ]);
+        let downloader =
+            MockDownloader::with_responses(&[("model.onnx", b"onnx"), ("selected_tags.csv", csv)]);
 
         let dir = tempdir().unwrap();
         // dest 自体をファイルにする。
@@ -1563,17 +1561,17 @@ pub(crate) mod download_model_tests {
     fn progress_phases_are_reported_in_order() {
         // 進捗フェーズが onnx → tagdef → saved の順で通知される。
         let csv = b"tag_id,name,category\n1,solo,0\n";
-        let downloader = MockDownloader::with_responses(&[
-            ("model.onnx", b"onnx"),
-            ("selected_tags.csv", csv),
-        ]);
+        let downloader =
+            MockDownloader::with_responses(&[("model.onnx", b"onnx"), ("selected_tags.csv", csv)]);
         let dir = tempdir().unwrap();
         let dest = dir.path().join("wd14-vit");
         let cancel = no_cancel();
 
         let mut phases = Vec::new();
-        download_variant(&downloader, &remote_wd14(), &dest, &cancel, |p| phases.push(p))
-            .unwrap();
+        download_variant(&downloader, &remote_wd14(), &dest, &cancel, |p| {
+            phases.push(p)
+        })
+        .unwrap();
         assert_eq!(
             phases,
             vec![
@@ -1776,8 +1774,8 @@ mod model_error_paths_tests {
         let dest = dir.path().join("wd14-vit");
         let cancel = no_cancel();
 
-        let err = download_variant(&downloader, &remote_wd14(), &dest, &cancel, |_| {})
-            .unwrap_err();
+        let err =
+            download_variant(&downloader, &remote_wd14(), &dest, &cancel, |_| {}).unwrap_err();
         assert_eq!(err.kind, AppErrorKind::Download);
         // 境界の厳密検証: .onnx の取得でちょうど上限回だけ呼ばれて打ち切る。
         assert_eq!(downloader.call_count(), MAX_DOWNLOAD_ATTEMPTS);
@@ -1791,10 +1789,8 @@ mod model_error_paths_tests {
         // カウンタは fetch 全体で通算されるため、model.onnx の取得で MAX 回目
         // （= 通算 MAX 回目）に初成功する。その後のタグ定義取得は 1 回目の fetch で
         // 既に通算値が MAX 以上のため即成功する。よって総呼び出しは MAX + 1 回。
-        let downloader = SucceedOnAttempt::new(
-            MAX_DOWNLOAD_ATTEMPTS,
-            b"tag_id,name,category\n1,solo,0\n",
-        );
+        let downloader =
+            SucceedOnAttempt::new(MAX_DOWNLOAD_ATTEMPTS, b"tag_id,name,category\n1,solo,0\n");
         let dir = tempdir().unwrap();
         let dest = dir.path().join("wd14-vit");
         let cancel = no_cancel();
@@ -1885,8 +1881,8 @@ mod model_error_paths_tests {
         let dest = dir.path().join("wd14-vit");
         let cancel = no_cancel();
 
-        let err = download_variant(&downloader, &remote_wd14(), &dest, &cancel, |_| {})
-            .unwrap_err();
+        let err =
+            download_variant(&downloader, &remote_wd14(), &dest, &cancel, |_| {}).unwrap_err();
         assert_eq!(err.kind, AppErrorKind::Download);
         // 保存物が無い（または対が揃わない）ので load_variant は Err。
         assert!(
@@ -2145,8 +2141,11 @@ mod presence_tests {
         // `.onnx` と `.csv` の対が揃う → Model_Present（要件 3.2）。
         let dir = tempdir().unwrap();
         fs::write(dir.path().join("model.onnx"), b"onnx").unwrap();
-        fs::write(dir.path().join("selected_tags.csv"), b"tag_id,name,category\n1,solo,0\n")
-            .unwrap();
+        fs::write(
+            dir.path().join("selected_tags.csv"),
+            b"tag_id,name,category\n1,solo,0\n",
+        )
+        .unwrap();
         assert!(is_present(dir.path()));
     }
 
@@ -2164,7 +2163,11 @@ mod presence_tests {
         // 大文字拡張子（.ONNX/.CSV）も onnx_with_tagdef が正規化して判定する。
         let dir = tempdir().unwrap();
         fs::write(dir.path().join("MODEL.ONNX"), b"onnx").unwrap();
-        fs::write(dir.path().join("TAGS.CSV"), b"tag_id,name,category\n1,solo,0\n").unwrap();
+        fs::write(
+            dir.path().join("TAGS.CSV"),
+            b"tag_id,name,category\n1,solo,0\n",
+        )
+        .unwrap();
         assert!(is_present(dir.path()));
     }
 
@@ -2180,8 +2183,11 @@ mod presence_tests {
     fn is_present_false_when_only_tagdef() {
         // タグ定義のみ → Not_Present（要件 3.4）。
         let dir = tempdir().unwrap();
-        fs::write(dir.path().join("selected_tags.csv"), b"tag_id,name,category\n1,solo,0\n")
-            .unwrap();
+        fs::write(
+            dir.path().join("selected_tags.csv"),
+            b"tag_id,name,category\n1,solo,0\n",
+        )
+        .unwrap();
         assert!(!is_present(dir.path()));
     }
 
@@ -2209,8 +2215,11 @@ mod presence_tests {
         let ready = variant_dir(base.path(), &catalog[0]);
         fs::create_dir_all(&ready).unwrap();
         fs::write(ready.join("model.onnx"), b"onnx").unwrap();
-        fs::write(ready.join("selected_tags.csv"), b"tag_id,name,category\n1,solo,0\n")
-            .unwrap();
+        fs::write(
+            ready.join("selected_tags.csv"),
+            b"tag_id,name,category\n1,solo,0\n",
+        )
+        .unwrap();
 
         let presence = catalog_presence(base.path(), &catalog);
         assert_eq!(presence.len(), 2);

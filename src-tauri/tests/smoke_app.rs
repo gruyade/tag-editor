@@ -42,16 +42,15 @@ use tag_editor_core::AppResult;
 
 /// confidence_threshold のみ設定した TagFilter を作る（旧 `threshold: f32` 相当）。
 fn threshold_filter(threshold: f32) -> tag_editor_core::models::TagFilter {
-    let (filter, _invalid) = tag_editor_core::logic::tag_filter::compile_filter(
-        tag_editor_core::models::RawTagFilter {
+    let (filter, _invalid) =
+        tag_editor_core::logic::tag_filter::compile_filter(tag_editor_core::models::RawTagFilter {
             keep: Vec::new(),
             exclude: Vec::new(),
             replace: Vec::new(),
             additional: Vec::new(),
             confidence_threshold: threshold,
             fraction_threshold: 0.0,
-        },
-    );
+        });
     filter
 }
 
@@ -347,7 +346,10 @@ fn long_running_job_honors_cancel_from_ui_thread() {
     // ジョブが動き出したら、UI スレッド相当の本スレッドからキャンセルを要求する。
     let _ = rx.recv();
     let requested = registry.request_cancel("smoke-cancel");
-    assert!(requested, "実行中ジョブへのキャンセル要求が登録に届いていない");
+    assert!(
+        requested,
+        "実行中ジョブへのキャンセル要求が登録に届いていない"
+    );
 
     let result = handle.join().expect("推論スレッドが panic した");
 

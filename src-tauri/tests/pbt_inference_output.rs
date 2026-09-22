@@ -48,8 +48,7 @@ fn label_strategy() -> impl Strategy<Value = LabelDef> {
 
 /// (ラベル, 生の確信度) の対をラベル数に応じて生成する。両者を同時に生成する
 /// ことで長さが常に一致し、proptest のシュリンクも自然に働く。
-fn labels_and_confidences_strategy(
-) -> impl Strategy<Value = (Vec<LabelDef>, Vec<f32>)> {
+fn labels_and_confidences_strategy() -> impl Strategy<Value = (Vec<LabelDef>, Vec<f32>)> {
     prop::collection::vec((label_strategy(), raw_confidence_strategy()), 0..64).prop_map(|pairs| {
         let labels = pairs.iter().map(|(l, _)| l.clone()).collect();
         let confidences = pairs.iter().map(|(_, c)| *c).collect();

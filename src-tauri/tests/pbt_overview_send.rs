@@ -148,8 +148,11 @@ fn representative_send_keep_and_exclude_inclusion() {
     };
 
     // keep へ送出（既存 "solo" と大小違い + 新規 " Long_Hair "）。
-    let after_keep = overview_send_keep(filter.clone(), vec![" SOLO ".to_string(), " Long_Hair ".to_string()])
-        .expect("送出は失敗しない");
+    let after_keep = overview_send_keep(
+        filter.clone(),
+        vec![" SOLO ".to_string(), " Long_Hair ".to_string()],
+    )
+    .expect("送出は失敗しない");
     let keep_keys = key_set(&after_keep.keep);
     assert!(keep_keys.contains("solo"));
     assert!(keep_keys.contains("long_hair"));
@@ -157,8 +160,11 @@ fn representative_send_keep_and_exclude_inclusion() {
     assert_eq!(after_keep.exclude, filter.exclude);
 
     // exclude へ送出。
-    let after_exclude = overview_send_exclude(filter.clone(), vec!["watermark".to_string(), "blurry".to_string()])
-        .expect("送出は失敗しない");
+    let after_exclude = overview_send_exclude(
+        filter.clone(),
+        vec!["watermark".to_string(), "blurry".to_string()],
+    )
+    .expect("送出は失敗しない");
     let exclude_keys = key_set(&after_exclude.exclude);
     assert!(exclude_keys.contains("watermark"));
     assert!(exclude_keys.contains("blurry"));

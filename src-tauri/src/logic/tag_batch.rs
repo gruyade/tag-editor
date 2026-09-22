@@ -71,11 +71,8 @@ pub fn apply_fraction_threshold(
 
     // Keep_Tags / Additional_Tags は割合による除外の対象外（要件 10.2）。
     let keep_keys: HashSet<String> = filter.keep.iter().map(|k| normalize_key(k)).collect();
-    let additional_keys: HashSet<String> = filter
-        .additional
-        .iter()
-        .map(|t| normalize_key(t))
-        .collect();
+    let additional_keys: HashSet<String> =
+        filter.additional.iter().map(|t| normalize_key(t)).collect();
 
     let image_count_f = image_count as f32;
 
@@ -101,7 +98,10 @@ pub fn apply_fraction_threshold(
     // 移送後の per_image から一覧を構築して結線する（要件 11.1, 11.2）。
     let overview = build_overview_from(&per_image);
 
-    BatchOutcome { per_image, overview }
+    BatchOutcome {
+        per_image,
+        overview,
+    }
 }
 
 /// 1 画像分の Adopted から除去対象キーのタグを Discarded へ移す。
@@ -268,7 +268,12 @@ pub fn search_overview(overview: &TagOverview, query: &str) -> TagOverview {
     };
 
     TagOverview {
-        adopted: overview.adopted.iter().filter(|s| matches(s)).cloned().collect(),
+        adopted: overview
+            .adopted
+            .iter()
+            .filter(|s| matches(s))
+            .cloned()
+            .collect(),
         discarded: overview
             .discarded
             .iter()
@@ -313,10 +318,7 @@ mod tests {
     #[test]
     fn single_image_is_not_applied() {
         // image_count == 1 なら適用せず入力をそのまま返す（要件 10.4）。
-        let per_image = vec![outcome(
-            &[Tag::with_confidence("rare", 0.9)],
-            &[],
-        )];
+        let per_image = vec![outcome(&[Tag::with_confidence("rare", 0.9)], &[])];
         let filter = filter_with(0.5, &[], &[]);
         let result = apply_fraction_threshold(&per_image, &filter, 1);
         assert_eq!(result.per_image, per_image);
@@ -339,7 +341,10 @@ mod tests {
         // 2 画像中 1 画像のみ出現（割合 0.5）< 閾値 0.6 → 除外。
         let per_image = vec![
             outcome(
-                &[Tag::with_confidence("common", 0.9), Tag::with_confidence("rare", 0.9)],
+                &[
+                    Tag::with_confidence("common", 0.9),
+                    Tag::with_confidence("rare", 0.9),
+                ],
                 &[],
             ),
             outcome(&[Tag::with_confidence("common", 0.8)], &[]),
@@ -436,7 +441,10 @@ mod tests {
                     &[Tag::with_confidence("drop", 0.4)],
                 ),
             ],
-            overview: TagOverview { adopted: vec![], discarded: vec![] },
+            overview: TagOverview {
+                adopted: vec![],
+                discarded: vec![],
+            },
         };
         let ov = build_overview(&batch);
         assert_eq!(ov.adopted.len(), 1);
@@ -458,7 +466,10 @@ mod tests {
                 outcome(&[Tag::with_confidence("t", 0.9)], &[]),
                 outcome(&[], &[Tag::with_confidence("t", 0.5)]),
             ],
-            overview: TagOverview { adopted: vec![], discarded: vec![] },
+            overview: TagOverview {
+                adopted: vec![],
+                discarded: vec![],
+            },
         };
         let ov = build_overview(&batch);
         assert_eq!(ov.adopted.len(), 1);
@@ -476,7 +487,10 @@ mod tests {
                 outcome(&[Tag::with_confidence("t", 0.8)], &[]),
                 outcome(&[Tag::new("t")], &[]),
             ],
-            overview: TagOverview { adopted: vec![], discarded: vec![] },
+            overview: TagOverview {
+                adopted: vec![],
+                discarded: vec![],
+            },
         };
         let ov = build_overview(&batch);
         assert_eq!(ov.adopted[0].image_count, 2);
@@ -489,7 +503,10 @@ mod tests {
         // すべて None なら代表確信度 0.0。
         let batch = BatchOutcome {
             per_image: vec![outcome(&[Tag::new("t")], &[])],
-            overview: TagOverview { adopted: vec![], discarded: vec![] },
+            overview: TagOverview {
+                adopted: vec![],
+                discarded: vec![],
+            },
         };
         let ov = build_overview(&batch);
         assert_eq!(ov.adopted[0].representative_confidence, 0.0);
@@ -500,10 +517,16 @@ mod tests {
         // 同一画像内の同名（正規化）キーは 1 画像として数える。
         let batch = BatchOutcome {
             per_image: vec![outcome(
-                &[Tag::with_confidence("Tag", 0.6), Tag::with_confidence(" tag ", 0.8)],
+                &[
+                    Tag::with_confidence("Tag", 0.6),
+                    Tag::with_confidence(" tag ", 0.8),
+                ],
                 &[],
             )],
-            overview: TagOverview { adopted: vec![], discarded: vec![] },
+            overview: TagOverview {
+                adopted: vec![],
+                discarded: vec![],
+            },
         };
         let ov = build_overview(&batch);
         assert_eq!(ov.adopted.len(), 1);
@@ -516,8 +539,16 @@ mod tests {
     fn search_empty_query_passes_all() {
         // 空クエリ（トリム後空含む）は全件通過。
         let ov = TagOverview {
-            adopted: vec![TagStat { name: "cat".into(), representative_confidence: 0.5, image_count: 1 }],
-            discarded: vec![TagStat { name: "dog".into(), representative_confidence: 0.5, image_count: 1 }],
+            adopted: vec![TagStat {
+                name: "cat".into(),
+                representative_confidence: 0.5,
+                image_count: 1,
+            }],
+            discarded: vec![TagStat {
+                name: "dog".into(),
+                representative_confidence: 0.5,
+                image_count: 1,
+            }],
         };
         let filtered = search_overview(&ov, "   ");
         assert_eq!(filtered.adopted.len(), 1);
@@ -529,12 +560,22 @@ mod tests {
         // 大小無視の部分一致（要件 11.3）。
         let ov = TagOverview {
             adopted: vec![
-                TagStat { name: "Cat".into(), representative_confidence: 0.5, image_count: 1 },
-                TagStat { name: "dog".into(), representative_confidence: 0.5, image_count: 1 },
+                TagStat {
+                    name: "Cat".into(),
+                    representative_confidence: 0.5,
+                    image_count: 1,
+                },
+                TagStat {
+                    name: "dog".into(),
+                    representative_confidence: 0.5,
+                    image_count: 1,
+                },
             ],
-            discarded: vec![
-                TagStat { name: "scatter".into(), representative_confidence: 0.5, image_count: 1 },
-            ],
+            discarded: vec![TagStat {
+                name: "scatter".into(),
+                representative_confidence: 0.5,
+                image_count: 1,
+            }],
         };
         let filtered = search_overview(&ov, "CAT");
         // "Cat"（採用）と "scatter"（不採用）が部分一致でヒット。
@@ -571,10 +612,7 @@ mod property_tests {
 
     /// 確信度（None または 0.0〜1.0）。None も混ぜて平均計算の除外を検証する。
     fn confidence() -> impl Strategy<Value = Option<f32>> {
-        prop_oneof![
-            Just(None),
-            (0.0f32..=1.0).prop_map(Some),
-        ]
+        prop_oneof![Just(None), (0.0f32..=1.0).prop_map(Some),]
     }
 
     /// 1 タグ（名前＋任意確信度）。
@@ -595,7 +633,10 @@ mod property_tests {
     fn batch() -> impl Strategy<Value = BatchOutcome> {
         prop::collection::vec(image_outcome(), 0..6).prop_map(|per_image| BatchOutcome {
             per_image,
-            overview: TagOverview { adopted: vec![], discarded: vec![] },
+            overview: TagOverview {
+                adopted: vec![],
+                discarded: vec![],
+            },
         })
     }
 

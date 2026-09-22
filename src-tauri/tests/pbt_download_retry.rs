@@ -95,12 +95,7 @@ impl KthAttemptDownloader {
 }
 
 impl ModelDownloader for KthAttemptDownloader {
-    fn fetch(
-        &self,
-        _repo: &str,
-        file: &str,
-        _timeout: Duration,
-    ) -> Result<Vec<u8>, DownloadError> {
+    fn fetch(&self, _repo: &str, file: &str, _timeout: Duration) -> Result<Vec<u8>, DownloadError> {
         // このファイルの呼び出し回数をインクリメントし、今回の試行番号 n を得る。
         let n = {
             let mut calls = self.calls.lock().unwrap();
@@ -295,10 +290,8 @@ fn boundary_k4_stops_at_limit_and_fails() {
 #[test]
 fn boundary_k_infinite_always_fails_stops_at_limit() {
     // 成功試行番号を登録しない = 常に失敗。
-    let downloader = KthAttemptDownloader::new(
-        vec![("selected_tags.csv".to_string(), 1)],
-        TAGDEF_CSV,
-    );
+    let downloader =
+        KthAttemptDownloader::new(vec![("selected_tags.csv".to_string(), 1)], TAGDEF_CSV);
     let variant = wd14_variant();
     let dir = tempfile::tempdir().unwrap();
     let dest = dir.path().join("wd14-vit");

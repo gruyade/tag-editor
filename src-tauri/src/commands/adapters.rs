@@ -395,9 +395,7 @@ pub fn spawn_variant_download(
     let variant = model_service::builtin_catalog()
         .into_iter()
         .find(|v| v.id == variant_id)
-        .ok_or_else(|| {
-            AppError::not_found(format!("カタログに存在しないモデル: {variant_id}"))
-        })?;
+        .ok_or_else(|| AppError::not_found(format!("カタログに存在しないモデル: {variant_id}")))?;
 
     // base_dir を PathResolver から供給する（要件 2.1）。
     let base_dir = resolve_base_dir(&app);
@@ -417,9 +415,7 @@ pub fn spawn_variant_download(
         move || -> Box<dyn ProgressEmitter + Send> { Box::new(TauriProgressEmitter::new(app)) },
         move |saved: &Path| {
             if let Ok(loaded) = model_service::load_variant(saved) {
-                *model_slot
-                    .lock()
-                    .expect("ModelSessionState mutex poisoned") = Some(loaded);
+                *model_slot.lock().expect("ModelSessionState mutex poisoned") = Some(loaded);
             }
         },
     );
@@ -641,6 +637,7 @@ struct InferenceRunnerSetup<R> {
 /// [`crate::app::emit_inference_complete`] を呼び、`inference://complete`
 /// イベントで Tag_Overview をフロントエンドへ届ける（要件 11.1、タスク 18.1）。
 /// 準備失敗時（推論を実行しない場合）は呼ばない。
+#[allow(clippy::too_many_arguments)]
 fn start_inference_core<R, PR, RS, EM, OC>(
     registry: Arc<CancelRegistry>,
     prepare_runner: PR,
@@ -734,6 +731,7 @@ where
 /// （[`crate::app::PROGRESS_EVENT`]）へ emit する。ロードしたセッションは次回の
 /// 推論のため `model_state` へ保持する。
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn start_inference(
     model_state: tauri::State<'_, ModelSessionState>,
     registry: tauri::State<'_, Arc<CancelRegistry>>,
@@ -971,7 +969,8 @@ pub fn rerun_inference(
 
     // (3) Fraction_Threshold を再適用し overview を構築する（要件 11.6）。
     let image_count = per_image.len();
-    let batch = crate::logic::tag_batch::apply_fraction_threshold(&per_image, &compiled, image_count);
+    let batch =
+        crate::logic::tag_batch::apply_fraction_threshold(&per_image, &compiled, image_count);
 
     // (4) 更新後の一覧を返す。
     Ok(batch.overview)
@@ -982,10 +981,8 @@ pub fn rerun_inference(
 /// 重複判定は正規化キー（前後トリム＋小文字化）で行う。追加要素は元の文字列を
 /// そのまま保持する（`compile_filter` 側が正規化するため）。追加順序を保存する。
 fn append_unique(target: &mut Vec<String>, additions: Vec<String>) {
-    let mut seen: std::collections::HashSet<String> = target
-        .iter()
-        .map(|s| s.trim().to_lowercase())
-        .collect();
+    let mut seen: std::collections::HashSet<String> =
+        target.iter().map(|s| s.trim().to_lowercase()).collect();
     for item in additions {
         let key = item.trim().to_lowercase();
         if seen.insert(key) {
@@ -1094,7 +1091,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(report.succeeded, 1);
-        assert_eq!(std::fs::read_to_string(dir.path().join("i.txt")).unwrap(), "new");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("i.txt")).unwrap(),
+            "new"
+        );
     }
 
     // --- 長時間処理コア: 進捗・キャンセル配線 ---
@@ -1157,8 +1157,7 @@ mod tests {
 
         assert_eq!(result.succeeded, 2);
         // 進捗が 2 件通知され done が単調増加、total は 2。
-        let seq: Vec<(usize, usize)> =
-            emitter.events.iter().map(|p| (p.done, p.total)).collect();
+        let seq: Vec<(usize, usize)> = emitter.events.iter().map(|p| (p.done, p.total)).collect();
         assert_eq!(seq, vec![(1, 2), (2, 2)]);
         // 完了後にレジストリ登録は解放されている（要件 17.7）。
         assert!(!registry.is_cancelled("job1"));
@@ -1461,9 +1460,7 @@ mod tests {
 
         // restore は呼ばれない（推論が走っていない）。短い猶予後に未受信を確認。
         assert!(
-            restore_rx
-                .recv_timeout(Duration::from_millis(300))
-                .is_err(),
+            restore_rx.recv_timeout(Duration::from_millis(300)).is_err(),
             "準備失敗時に restore が呼ばれた（推論が実行されている）"
         );
     }
@@ -1850,8 +1847,10 @@ mod tests {
         use std::sync::atomic::AtomicBool;
 
         let csv = b"tag_id,name,category\n1,solo,0\n";
-        let downloader =
-            MockDownloader::with_responses(&[("model.onnx", b"onnx-a"), ("selected_tags.csv", csv)]);
+        let downloader = MockDownloader::with_responses(&[
+            ("model.onnx", b"onnx-a"),
+            ("selected_tags.csv", csv),
+        ]);
 
         let dir = tempdir().unwrap();
         let dest = dir.path().join("wd14-vit");
@@ -1961,7 +1960,9 @@ mod tests {
 
         // 「モデル選択」に相当: セッションスロットへ runner をセットする。
         let model_slot: Arc<std::sync::Mutex<Option<MockRunner>>> =
-            Arc::new(std::sync::Mutex::new(Some(MockRunner { output: vec![0.9] })));
+            Arc::new(std::sync::Mutex::new(Some(MockRunner {
+                output: vec![0.9],
+            })));
         let take_slot = Arc::clone(&model_slot);
         let restore_slot = Arc::clone(&model_slot);
         // クロージャへ move された後もテスト末尾でスロットの状態を検査できる
@@ -2076,7 +2077,9 @@ mod tests {
         }
 
         let model_slot: Arc<std::sync::Mutex<Option<MockRunner>>> =
-            Arc::new(std::sync::Mutex::new(Some(MockRunner { output: vec![0.9] })));
+            Arc::new(std::sync::Mutex::new(Some(MockRunner {
+                output: vec![0.9],
+            })));
         let take_slot = Arc::clone(&model_slot);
         let restore_slot = Arc::clone(&model_slot);
         let check_slot = Arc::clone(&model_slot);
@@ -2145,7 +2148,10 @@ mod tests {
             .recv_timeout(Duration::from_secs(5))
             .expect("最初の進捗が時間内に届かなかった");
         let requested = registry_for_cancel.request_cancel(&operation_id);
-        assert!(requested, "実行中ジョブへのキャンセル要求が登録に届いていない");
+        assert!(
+            requested,
+            "実行中ジョブへのキャンセル要求が登録に届いていない"
+        );
 
         let signal = restore_rx
             .recv_timeout(Duration::from_secs(5))
@@ -2198,8 +2204,7 @@ mod tests {
                 // （セッション保持、要件 2.5）。
                 assert!(saved.join("model.onnx").exists());
                 assert!(saved.join("selected_tags.csv").exists());
-                *session_slot_for_download.lock().unwrap() =
-                    Some(MockRunner { output: vec![0.8] });
+                *session_slot_for_download.lock().unwrap() = Some(MockRunner { output: vec![0.8] });
                 let _ = done_tx.send(());
             },
         );

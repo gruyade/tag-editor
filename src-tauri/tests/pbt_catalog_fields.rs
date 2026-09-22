@@ -238,8 +238,18 @@ fn representative_partition_and_dedup() {
     let candidates = vec![
         cand("a", "A", ModelFamily::Wd14, "a.onnx"),
         cand("", "空 id", ModelFamily::Wd14, "b.onnx"),
-        cand("dup", "同一リポジトリ .onnx 1", ModelFamily::MlDanbooru, "c.onnx"),
-        cand("dup", "同一リポジトリ .onnx 2", ModelFamily::MlDanbooru, "d.onnx"),
+        cand(
+            "dup",
+            "同一リポジトリ .onnx 1",
+            ModelFamily::MlDanbooru,
+            "c.onnx",
+        ),
+        cand(
+            "dup",
+            "同一リポジトリ .onnx 2",
+            ModelFamily::MlDanbooru,
+            "d.onnx",
+        ),
         cand("empty-name", "   ", ModelFamily::Wd14, "e.onnx"),
     ];
     let total = candidates.len();

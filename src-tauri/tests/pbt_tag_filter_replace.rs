@@ -55,12 +55,7 @@ fn plain_name() -> impl Strategy<Value = String> {
 
 /// 確信度ジェネレータ（0.0/1.0/中間・境界近傍をカバー）。
 fn confidence() -> impl Strategy<Value = f32> {
-    prop_oneof![
-        Just(0.0f32),
-        Just(1.0f32),
-        Just(0.5f32),
-        0.0f32..=1.0f32,
-    ]
+    prop_oneof![Just(0.0f32), Just(1.0f32), Just(0.5f32), 0.0f32..=1.0f32,]
 }
 
 /// 閾値ジェネレータ。

@@ -71,12 +71,7 @@ struct MockDownloader {
 }
 
 impl ModelDownloader for MockDownloader {
-    fn fetch(
-        &self,
-        _repo: &str,
-        file: &str,
-        _timeout: Duration,
-    ) -> Result<Vec<u8>, DownloadError> {
+    fn fetch(&self, _repo: &str, file: &str, _timeout: Duration) -> Result<Vec<u8>, DownloadError> {
         if file == self.onnx_file {
             if self.onnx_ok {
                 Ok(b"onnx-bytes".to_vec())
@@ -259,7 +254,10 @@ fn partial_save_failure_removes_partial_files() {
         |_phase| {},
     );
 
-    assert!(result.is_err(), "タグ定義の保存に失敗する場合は Err を返すべき");
+    assert!(
+        result.is_err(),
+        "タグ定義の保存に失敗する場合は Err を返すべき"
+    );
     // onnx は書けたかもしれないが、対（タグ定義）が無いので Model_Present ではない。
     assert!(
         !is_present(&variant_dir_path),

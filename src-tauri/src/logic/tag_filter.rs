@@ -169,7 +169,12 @@ pub fn apply_filter(filter: &TagFilter, predicted: &[Tag]) -> FilterOutcome {
     //     先頭に置き、以降に予測由来の採用タグを続けることで「先頭・先勝ち」で
     //     最初の出現のみを残す。
     let mut merged: Vec<Tag> = Vec::with_capacity(filter.additional.len() + adopted.len());
-    merged.extend(filter.additional.iter().map(|extra| Tag::new(extra.clone())));
+    merged.extend(
+        filter
+            .additional
+            .iter()
+            .map(|extra| Tag::new(extra.clone())),
+    );
     merged.extend(adopted);
     let adopted = dedup_by_key(merged);
 
@@ -224,7 +229,11 @@ mod tests {
     #[test]
     fn keep_is_normalized_to_key_set() {
         let mut r = raw();
-        r.keep = vec!["  Long_Hair ".to_string(), "SOLO".to_string(), "solo".to_string()];
+        r.keep = vec![
+            "  Long_Hair ".to_string(),
+            "SOLO".to_string(),
+            "solo".to_string(),
+        ];
         let (filter, invalid) = compile_filter(r);
 
         assert!(invalid.is_empty());
@@ -330,7 +339,10 @@ mod tests {
         let (filter, invalid) = compile_filter(r);
 
         assert!(invalid.is_empty());
-        assert_eq!(filter.additional, vec!["extra".to_string(), "tags".to_string()]);
+        assert_eq!(
+            filter.additional,
+            vec!["extra".to_string(), "tags".to_string()]
+        );
         assert_eq!(filter.confidence_threshold, 0.35);
         assert_eq!(filter.fraction_threshold, 0.5);
     }
@@ -487,7 +499,10 @@ mod apply_filter_tests {
         let f = filter(&[], &["smile"], &[], &[], 0.0);
         let out = apply_filter(
             &f,
-            &[Tag::with_confidence("smile", 0.99), Tag::with_confidence("solo", 0.99)],
+            &[
+                Tag::with_confidence("smile", 0.99),
+                Tag::with_confidence("solo", 0.99),
+            ],
         );
         assert_eq!(bodies(&out.adopted), vec!["solo"]);
         assert_eq!(bodies(&out.discarded), vec!["smile"]);
@@ -574,13 +589,7 @@ mod apply_filter_tests {
     #[test]
     fn replace_collision_is_deduplicated() {
         // 複数の予測タグが同名へ書き換わったら重複除去（先勝ち）。
-        let f = filter(
-            &[],
-            &[],
-            &[("girl", "woman"), ("1girl", "woman")],
-            &[],
-            0.0,
-        );
+        let f = filter(&[], &[], &[("girl", "woman"), ("1girl", "woman")], &[], 0.0);
         let predicted = vec![
             Tag::with_confidence("girl", 0.9),
             Tag::with_confidence("1girl", 0.7),
@@ -598,7 +607,10 @@ mod apply_filter_tests {
         let f = filter(&[], &[], &[], &["solo"], 0.0);
         let out = apply_filter(
             &f,
-            &[Tag::with_confidence("solo", 0.9), Tag::with_confidence("1girl", 0.8)],
+            &[
+                Tag::with_confidence("solo", 0.9),
+                Tag::with_confidence("1girl", 0.8),
+            ],
         );
         // 先頭に Additional の "solo"（確信度なし）、続けて重複しない "1girl"。
         assert_eq!(bodies(&out.adopted), vec!["solo", "1girl"]);

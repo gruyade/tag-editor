@@ -59,10 +59,7 @@ pub fn capabilities() -> Capabilities {
 /// [`AppErrorKind::AlreadyExists`]: crate::error::AppErrorKind::AlreadyExists
 /// [`AppErrorKind::AccessDenied`]: crate::error::AppErrorKind::AccessDenied
 /// [`AppErrorKind::Unsupported`]: crate::error::AppErrorKind::Unsupported
-pub fn create_symlink(
-    link_target: impl AsRef<Path>,
-    link_path: impl AsRef<Path>,
-) -> AppResult<()> {
+pub fn create_symlink(link_target: impl AsRef<Path>, link_path: impl AsRef<Path>) -> AppResult<()> {
     let target = link_target.as_ref();
     let link = link_path.as_ref();
 
@@ -72,11 +69,10 @@ pub fn create_symlink(
     // リンク元不在（要件 13.4）。symlink_metadata で対象自体の存在を確認する
     // （target が壊れたリンクの場合でも「存在する」とみなす）。
     if std::fs::symlink_metadata(target).is_err() {
-        return Err(AppError::not_found(format!(
-            "リンク元が存在しません: {}",
-            target.display()
-        ))
-        .with_path(target.display().to_string()));
+        return Err(
+            AppError::not_found(format!("リンク元が存在しません: {}", target.display()))
+                .with_path(target.display().to_string()),
+        );
     }
 
     // 宛先使用中（要件 13.5）。既存のファイル/ディレクトリ/リンクがあれば拒否する。
@@ -103,7 +99,9 @@ fn create_symlink_platform(target: &Path, link: &Path) -> AppResult<()> {
     use std::os::windows::fs::{symlink_dir, symlink_file};
 
     // リンク元の種別に応じて dir/file を選択する。事前検査で存在は確認済み。
-    let is_dir = std::fs::metadata(target).map(|m| m.is_dir()).unwrap_or(false);
+    let is_dir = std::fs::metadata(target)
+        .map(|m| m.is_dir())
+        .unwrap_or(false);
 
     let result = if is_dir {
         symlink_dir(target, link)
@@ -151,14 +149,12 @@ fn map_symlink_io_error(e: std::io::Error, target: &Path, link: &Path) -> AppErr
         ))
     } else {
         match e.kind() {
-            IoKind::AlreadyExists => AppError::already_exists(format!(
-                "作成先が既に使用中です: {}",
-                link.display()
-            )),
-            IoKind::NotFound => AppError::not_found(format!(
-                "リンク元が存在しません: {}",
-                target.display()
-            )),
+            IoKind::AlreadyExists => {
+                AppError::already_exists(format!("作成先が既に使用中です: {}", link.display()))
+            }
+            IoKind::NotFound => {
+                AppError::not_found(format!("リンク元が存在しません: {}", target.display()))
+            }
             _ => AppError::io(format!("シンボリックリンク作成に失敗しました: {}", e)),
         }
     };

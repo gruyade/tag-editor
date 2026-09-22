@@ -23,7 +23,7 @@ pub const MAX_BATCH_SIZE: u32 = 64;
 fn is_mp4(path: &str) -> bool {
     // 最後の '.' 以降を拡張子として取り出す。区切り文字は '/' と '\\' の双方を考慮。
     let file_name = path
-        .rsplit(|c| c == '/' || c == '\\')
+        .rsplit(['/', '\\'])
         .next()
         .unwrap_or(path);
     match file_name.rsplit_once('.') {
@@ -41,11 +41,7 @@ fn is_mp4(path: &str) -> bool {
 ///
 /// mp4 を除外したパスの複製列（入力順を保存）。
 pub fn exclude_videos(paths: &[String]) -> Vec<String> {
-    paths
-        .iter()
-        .filter(|path| !is_mp4(path))
-        .cloned()
-        .collect()
+    paths.iter().filter(|path| !is_mp4(path)).cloned().collect()
 }
 
 /// Batch_Size を解決する（要件 17.3, 17.4, 17.5）。

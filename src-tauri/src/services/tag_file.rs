@@ -254,7 +254,10 @@ mod tests {
         let err = write_tag_file(&image, "attempted new content").unwrap_err();
         // 一時ファイル作成失敗は I/O 系エラーとして伝播する。
         assert!(
-            matches!(err.kind, AppErrorKind::Io | AppErrorKind::AlreadyExists | AppErrorKind::AccessDenied),
+            matches!(
+                err.kind,
+                AppErrorKind::Io | AppErrorKind::AlreadyExists | AppErrorKind::AccessDenied
+            ),
             "unexpected error kind: {:?}",
             err.kind
         );

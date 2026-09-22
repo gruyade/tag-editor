@@ -203,10 +203,7 @@ mod tests {
     #[test]
     fn split_tokens_ignores_empty_tokens() {
         // 連続カンマ・末尾カンマ・空白のみのトークンはすべて無視。
-        assert_eq!(
-            split_tokens("1girl,,solo, ,"),
-            vec!["1girl", "solo"]
-        );
+        assert_eq!(split_tokens("1girl,,solo, ,"), vec!["1girl", "solo"]);
     }
 
     #[test]
@@ -327,10 +324,7 @@ mod tests {
             "1girl".to_string(),
             "smile".to_string(),
         ];
-        assert_eq!(
-            remove_tags(&tags, &["1GIRL"]),
-            vec!["Long Hair", "smile"]
-        );
+        assert_eq!(remove_tags(&tags, &["1GIRL"]), vec!["Long Hair", "smile"]);
     }
 
     #[test]
@@ -374,11 +368,7 @@ mod tests {
 
     #[test]
     fn dedup_tags_is_idempotent() {
-        let tags = [
-            "Solo".to_string(),
-            "solo".to_string(),
-            "1girl".to_string(),
-        ];
+        let tags = ["Solo".to_string(), "solo".to_string(), "1girl".to_string()];
         let once = dedup_tags(&tags);
         let twice = dedup_tags(&once);
         assert_eq!(once, twice);

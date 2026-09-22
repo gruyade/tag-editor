@@ -71,11 +71,7 @@ fn body_strategy() -> impl Strategy<Value = String> {
 
 /// 0.0〜1.0 の信頼度ジェネレータ。境界 0.0 / 1.0 を明示的に混ぜる。
 fn confidence_strategy() -> impl Strategy<Value = f32> {
-    prop_oneof![
-        Just(0.0_f32),
-        Just(1.0_f32),
-        (0.0_f32..=1.0_f32),
-    ]
+    prop_oneof![Just(0.0_f32), Just(1.0_f32), (0.0_f32..=1.0_f32),]
 }
 
 proptest! {

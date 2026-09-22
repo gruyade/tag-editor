@@ -40,10 +40,7 @@ fn tag_name() -> impl Strategy<Value = String> {
 
 /// 確信度（None または 0.0〜1.0）。None を混ぜて平均計算の母数除外を検証する。
 fn confidence() -> impl Strategy<Value = Option<f32>> {
-    prop_oneof![
-        Just(None),
-        (0.0f32..=1.0).prop_map(Some),
-    ]
+    prop_oneof![Just(None), (0.0f32..=1.0).prop_map(Some),]
 }
 
 /// 1 タグ（名前＋任意確信度）。

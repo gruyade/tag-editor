@@ -32,14 +32,13 @@ fn tag_name_strategy() -> impl Strategy<Value = String> {
 
 /// Predicted_Tag 生成器（確信度は None / 0.0〜1.0 を混在）。
 fn predicted_strategy() -> impl Strategy<Value = Vec<Tag>> {
-    let one = (
-        tag_name_strategy(),
-        prop::option::of(0.0f32..=1.0f32),
-    )
-        .prop_map(|(body, conf)| match conf {
-            Some(c) => Tag::with_confidence(body, c),
-            None => Tag::new(body),
-        });
+    let one =
+        (tag_name_strategy(), prop::option::of(0.0f32..=1.0f32)).prop_map(
+            |(body, conf)| match conf {
+                Some(c) => Tag::with_confidence(body, c),
+                None => Tag::new(body),
+            },
+        );
     prop::collection::vec(one, 0..8)
 }
 

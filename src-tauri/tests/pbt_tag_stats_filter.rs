@@ -62,7 +62,11 @@ fn tag_strategy() -> impl Strategy<Value = String> {
         prop_oneof![Just(""), Just(" "), Just("\t"), Just("  ")],
     )
         .prop_map(|(body, upper, lead, trail)| {
-            let core = if upper { body.to_uppercase() } else { body.to_string() };
+            let core = if upper {
+                body.to_uppercase()
+            } else {
+                body.to_string()
+            };
             format!("{lead}{core}{trail}")
         })
 }

@@ -225,8 +225,8 @@ fn counterexample_4_lightweight_transfer_path_exists() {
     let adapters = read_tauri_source("src/commands/adapters.rs");
 
     // (d-1) JSON 数値配列を経ないファイルパス参照経路（案 A）が Rust に追加されている。
-    let has_path_route = adapters.contains("get_thumbnail_path")
-        || adapters.contains("get_preview_path");
+    let has_path_route =
+        adapters.contains("get_thumbnail_path") || adapters.contains("get_preview_path");
     assert!(
         has_path_route,
         "反例4(d): JSON 数値配列を経ない新経路（get_thumbnail_path/get_preview_path）が未定義。\
