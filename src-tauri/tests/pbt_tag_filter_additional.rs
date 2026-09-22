@@ -92,15 +92,24 @@ proptest! {
 
         let out = apply_filter(&filter, &predicted);
 
-        let adopted_bodies: HashSet<&str> =
-            out.adopted.iter().map(|t| t.body.as_str()).collect();
+        // adopted は正規化キー（前後トリム＋小文字化）で重複除去される。よって
+        // 「含む」は body 完全一致ではなく正規化キーの包含で判定する。
+        let adopted_keys: HashSet<String> = out
+            .adopted
+            .iter()
+            .map(|t| t.body.trim().to_lowercase())
+            .collect();
 
-        // additional の各タグ（文字列そのまま）が adopted の body 集合に含まれる。
+        // additional の各タグは（正規化キーで）adopted に含まれる。
+        // 正規化キーが同一の additional 同士は重複除去で 1 つに畳まれるが、
+        // そのキーは必ず adopted 側に現れる。
         for extra in &additional {
+            let key = extra.trim().to_lowercase();
             prop_assert!(
-                adopted_bodies.contains(extra.as_str()),
-                "Additional_Tag {:?} が adopted に含まれない: adopted={:?}",
+                adopted_keys.contains(&key),
+                "Additional_Tag {:?}（キー {:?}）が adopted に含まれない: adopted={:?}",
                 extra,
+                key,
                 out.adopted
             );
         }

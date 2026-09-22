@@ -251,6 +251,22 @@ pub fn list_catalog(app: tauri::AppHandle) -> AppResult<crate::models::CatalogLi
     })
 }
 
+/// モデル保存フォルダ（Model_Dir）のパスを解決する（UI に表示するテキスト用）。
+///
+/// [`resolve_base_dir`] で得た `base_dir` から
+/// [`model_service::resolve_model_dir`] で Model_Dir を求め、未作成なら
+/// [`model_service::ensure_model_dir`] で作成してから絶対パス文字列を返す
+/// （要件 2.2）。フロントエンドはこのパスをモデル管理タブへテキストとして
+/// 表示するだけで、OS のファイルマネージャを開く操作は提供しない。作成失敗
+/// （権限不足等）は `Err` を返す。
+#[tauri::command]
+pub fn get_model_dir_path(app: tauri::AppHandle) -> AppResult<String> {
+    let base_path = resolve_base_dir(&app);
+    let model_dir = model_service::resolve_model_dir(&base_path);
+    model_service::ensure_model_dir(&model_dir)?;
+    Ok(model_dir.to_string_lossy().into_owned())
+}
+
 // 旧 `load_local_model` コマンドはタスク 13.3 で撤去した。新設計では
 // [`start_inference`] が遅延 DL + [`model_service::load_variant`] を内包するため、
 // フロントエンドからの明示ロードコマンドは不要（design「移行方針まとめ」）。
@@ -1461,7 +1477,6 @@ mod tests {
     /// アサーションする（スリープでのポーリングは避ける）。
     #[test]
     fn start_inference_core_runs_inference_and_restores_state_when_loaded() {
-        use crate::commands::progress::RecordingEmitter;
         use std::sync::mpsc;
 
         let dir = tempdir().unwrap();
@@ -1477,8 +1492,10 @@ mod tests {
         // 完了・書き戻し通知用チャネル。restore が呼ばれたことを合図する。
         let (restore_tx, restore_rx) = mpsc::channel::<&'static str>();
         // 進捗蓄積を確認するため、テスト側の Vec へ Arc<Mutex<...>> で共有する。
-        let recorded: Arc<std::sync::Mutex<Option<RecordingEmitter>>> =
-            Arc::new(std::sync::Mutex::new(None));
+        // emit のたびに共有 Vec へ push する（emitter の Drop に依存しない。
+        // Drop 完了は restore 合図と順序保証がなく競合の元になるため）。
+        let recorded: Arc<std::sync::Mutex<Vec<crate::models::Progress>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
         let recorded_for_emitter = Arc::clone(&recorded);
 
         let setup_labels = labels(&["a"]);
@@ -1499,27 +1516,18 @@ mod tests {
                 let _ = restore_tx.send("restored");
             },
             move || -> Box<dyn ProgressEmitter + Send> {
-                let emitter = RecordingEmitter::new();
-                // emitter 自体はスレッドへ move するため、テスト側では
-                // 完了後に別途 events を検証できないので、ここでは
-                // 完了合図だけを担う軽量ラッパーへ差し替える。
+                // emitter 自体はスレッドへ move するため、テスト側では emit の
+                // たびに共有 Vec へ即時 push する（Drop 完了を待つ設計は restore
+                // 合図との順序保証が無く競合の元になるため避ける）。
                 struct Sharing {
-                    inner: RecordingEmitter,
-                    shared: Arc<std::sync::Mutex<Option<RecordingEmitter>>>,
+                    shared: Arc<std::sync::Mutex<Vec<crate::models::Progress>>>,
                 }
                 impl ProgressEmitter for Sharing {
                     fn emit(&mut self, progress: crate::models::Progress) {
-                        self.inner.emit(progress);
-                    }
-                }
-                impl Drop for Sharing {
-                    fn drop(&mut self) {
-                        let events = std::mem::take(&mut self.inner);
-                        *self.shared.lock().unwrap() = Some(events);
+                        self.shared.lock().unwrap().push(progress);
                     }
                 }
                 Box::new(Sharing {
-                    inner: emitter,
                     shared: recorded_for_emitter,
                 })
             },
@@ -1541,13 +1549,14 @@ mod tests {
         assert_eq!(signal, "restored");
 
         // restore は run_inference_job 完了後に呼ばれるため、この時点で
-        // レジストリは解放済み・進捗は蓄積済みのはず。
+        // レジストリは解放済み・進捗は蓄積済みのはず（emit は共有 Vec への即時
+        // push のため、restore 合図の時点で確実に反映済み）。
         assert!(registry.is_empty());
 
-        let events = recorded.lock().unwrap().take().expect("進捗が記録されていない");
-        assert_eq!(events.events.len(), 3);
-        assert_eq!(events.events.last().unwrap().done, 3);
-        for ev in &events.events {
+        let events = recorded.lock().unwrap();
+        assert_eq!(events.len(), 3, "進捗が記録されていない: {events:?}");
+        assert_eq!(events.last().unwrap().done, 3);
+        for ev in events.iter() {
             assert_eq!(ev.operation_id, "loaded-job");
         }
     }

@@ -64,6 +64,9 @@ const state = {
   // Tag_Overview の検索絞り込み後の表示（overview_search の戻り、要件 11.3）。
   // null なら overview を全件表示する。
   overviewFiltered: null,
+  // Tag_Overview で選択中のタグ名の集合（クリックでトグル）。keep/exclude 送出は
+  // 表示中ではなく「選択中」のタグを対象にする（要件 11.4, 11.5）。
+  overviewSelected: new Set(),
   // 直近バッチ推論の対象 Image_File パス列（再推論で同一バッチへ再適用、要件 11.6）。
   lastInferTargets: [],
   // 直近バッチ推論の completion イベント購読解除関数。
@@ -508,16 +511,19 @@ const ops = {
   overviewSearch: document.getElementById("overview-search"),
   overviewKeep: document.getElementById("overview-keep"),
   overviewExclude: document.getElementById("overview-exclude"),
+  overviewReplace: document.getElementById("overview-replace"),
   overviewRerun: document.getElementById("overview-rerun"),
   overviewAdopted: document.getElementById("overview-adopted"),
   overviewDiscarded: document.getElementById("overview-discarded"),
   overviewAdoptedCount: document.getElementById("overview-adopted-count"),
   overviewDiscardedCount: document.getElementById("overview-discarded-count"),
+  overviewSelectedCount: document.getElementById("overview-selected-count"),
   overviewResult: document.getElementById("overview-result"),
 
   // モデル管理（カタログ一覧・存在状態・DL）
   modelRefresh: document.getElementById("model-refresh"),
   modelDirNote: document.getElementById("model-dir-note"),
+  modelDirPath: document.getElementById("model-dir-path"),
   modelCatalog: document.getElementById("model-catalog"),
   modelExcluded: document.getElementById("model-excluded"),
   modelResult: document.getElementById("model-result"),
@@ -592,14 +598,11 @@ async function pickFolderInto(input) {
 
 /**
  * 一括操作/推論の対象 Image_File パス列を返す（要件 3.1 の対象選択）。
- * targetName は radio group 名。"selected" が選ばれていれば選択集合、
- * それ以外は一覧の全画像を対象にする。
+ * 選択モード ON なら選択中の画像のみ、OFF なら一覧の全画像を対象にする
+ * （対象ラジオボタンは廃止し、画面上部の選択モードの状態から自動的に決まる）。
  */
-function resolveTargets(targetName) {
-  const mode = document.querySelector(
-    `input[name="${targetName}"]:checked`
-  );
-  if (mode && mode.value === "selected") {
+function resolveTargets() {
+  if (state.selectMode) {
     // 選択集合のうち、現在の一覧に含まれるものだけを対象にする。
     const listed = new Set(state.items.map((i) => i.path));
     return [...state.picked].filter((p) => listed.has(p));
@@ -614,11 +617,12 @@ function updateSelectCount() {
   const hasItems = state.items.length > 0;
   ops.selectAll.disabled = !hasItems || !state.selectMode;
   ops.selectNone.disabled = n === 0;
-  const hint = state.selectMode
-    ? `（選択 ${n} 件 / 一覧 ${state.items.length} 件）`
-    : "（選択モードOFF: 一覧全件が対象）";
-  if (ops.bulkTargetHint) ops.bulkTargetHint.textContent = hint;
-  if (ops.inferTargetHint) ops.inferTargetHint.textContent = hint;
+  // 一括操作/推論の対象は選択モードの状態が自動的に決める（ラジオボタンは廃止）。
+  const targetHint = state.selectMode
+    ? `選択モード中: 選択した ${n} 件が対象`
+    : `選択モードOFF: 一覧全件（${state.items.length} 件）が対象`;
+  if (ops.bulkTargetHint) ops.bulkTargetHint.textContent = targetHint;
+  if (ops.inferTargetHint) ops.inferTargetHint.textContent = targetHint;
 }
 
 // ---- 選択モード ----
@@ -669,9 +673,14 @@ for (const tab of document.querySelectorAll(".ops-tab")) {
 // ---- 一括操作（要件 3.1, 3.3, 3.4） ----
 
 async function runBulk(command, needTags) {
-  const targets = resolveTargets("bulk-target");
+  const targets = resolveTargets();
   if (targets.length === 0) {
-    renderText(ops.bulkResult, "対象の画像がありません（フォルダ未選択または選択0件）");
+    renderText(
+      ops.bulkResult,
+      state.selectMode
+        ? "対象の画像がありません（選択モード中は選択した画像が対象。0件選択中）"
+        : "対象の画像がありません（フォルダ未選択）"
+    );
     return;
   }
   const args = { targets };
@@ -1090,8 +1099,9 @@ async function startCompleteSubscription() {
         // overview を state に保持して 2 区分描画する（要件 11.1, 11.2）。
         state.overview = result.overview || { adopted: [], discarded: [] };
         state.overviewFiltered = null;
-        // 検索ボックスは新バッチで一旦クリアする。
+        // 検索ボックスと選択は新バッチで一旦クリアする。
         ops.overviewSearch.value = "";
+        state.overviewSelected.clear();
         renderOverview();
         ops.overviewPanel.hidden = false;
         renderText(
@@ -1127,9 +1137,14 @@ function finishInference() {
 }
 
 ops.inferRun.addEventListener("click", async () => {
-  const targets = resolveTargets("infer-target");
+  const targets = resolveTargets();
   if (targets.length === 0) {
-    renderText(ops.inferResult, "対象の画像がありません（フォルダ未選択または選択0件）");
+    renderText(
+      ops.inferResult,
+      state.selectMode
+        ? "対象の画像がありません（選択モード中は選択した画像が対象。0件選択中）"
+        : "対象の画像がありません（フォルダ未選択）"
+    );
     return;
   }
   const threshold = Number(ops.inferThreshold.value);
@@ -1222,14 +1237,24 @@ function currentOverview() {
   return state.overview;
 }
 
-/** 1 タグ（TagStat）の行要素を構築する（タグ名＋代表確信度、要件 11.2）。 */
+/**
+ * 1 タグ（TagStat）の行要素を構築する（タグ名＋代表確信度、要件 11.2）。
+ * 行はクリックで選択トグルできる。選択中のタグは keep/exclude 送出の対象になる
+ * （要件 11.4, 11.5）。
+ */
 function buildOverviewRow(stat) {
   const row = document.createElement("div");
   row.className = "overview-row";
+  row.tabIndex = 0;
+  row.setAttribute("role", "button");
+  const selected = state.overviewSelected.has(stat.name);
+  row.classList.toggle("selected", selected);
+  row.setAttribute("aria-pressed", selected ? "true" : "false");
+  row.title = "クリックで選択/解除";
+
   const name = document.createElement("span");
   name.className = "overview-tag-name";
   name.textContent = stat.name;
-  name.title = stat.name;
   const conf = document.createElement("span");
   conf.className = "overview-tag-conf";
   // representative_confidence は 0.0〜1.0。出現画像数も併記する。
@@ -1237,7 +1262,37 @@ function buildOverviewRow(stat) {
   conf.textContent = `${pct}%（${stat.image_count} 枚）`;
   row.appendChild(name);
   row.appendChild(conf);
+
+  // クリック/Enter/Space で選択をトグルする。
+  const toggle = () => toggleOverviewSelection(stat.name, row);
+  row.addEventListener("click", toggle);
+  row.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" || ev.key === " ") {
+      ev.preventDefault();
+      toggle();
+    }
+  });
   return row;
+}
+
+/** タグの選択状態をトグルし、行の見た目と選択件数表示を更新する。 */
+function toggleOverviewSelection(tagName, row) {
+  if (state.overviewSelected.has(tagName)) {
+    state.overviewSelected.delete(tagName);
+  } else {
+    state.overviewSelected.add(tagName);
+  }
+  const on = state.overviewSelected.has(tagName);
+  row.classList.toggle("selected", on);
+  row.setAttribute("aria-pressed", on ? "true" : "false");
+  updateOverviewSelectionHint();
+}
+
+/** 選択中タグの件数を送出ボタン付近へ表示する。 */
+function updateOverviewSelectionHint() {
+  if (!ops.overviewSelectedCount) return;
+  const n = state.overviewSelected.size;
+  ops.overviewSelectedCount.textContent = n > 0 ? `選択 ${n} 件` : "";
 }
 
 /** 1 区分の一覧をリスト要素へ描画する。空なら「なし」を表示する。 */
@@ -1260,16 +1315,19 @@ function renderOverview() {
   const ov = currentOverview();
   const adopted = (ov && ov.adopted) || [];
   const discarded = (ov && ov.discarded) || [];
+  // 現在の overview に存在しないタグの選択は落とす（検索絞り込み等で消えた分）。
+  const present = new Set(visibleOverviewTagNames());
+  for (const name of [...state.overviewSelected]) {
+    if (!present.has(name)) state.overviewSelected.delete(name);
+  }
   renderOverviewList(ops.overviewAdopted, adopted);
   renderOverviewList(ops.overviewDiscarded, discarded);
   ops.overviewAdoptedCount.textContent = `${adopted.length} 件`;
   ops.overviewDiscardedCount.textContent = `${discarded.length} 件`;
+  updateOverviewSelectionHint();
 }
 
-/**
- * 現在の表示（検索絞り込み後含む）に含まれる全タグ名を返す。
- * keep/exclude 送出は「表示中のタグ」を対象にする（要件 11.4, 11.5）。
- */
+/** 現在の overview（検索絞り込み後含む）に含まれる全タグ名を返す。 */
 function visibleOverviewTagNames() {
   const ov = currentOverview();
   if (!ov) return [];
@@ -1277,6 +1335,15 @@ function visibleOverviewTagNames() {
   for (const s of ov.adopted || []) names.push(s.name);
   for (const s of ov.discarded || []) names.push(s.name);
   return names;
+}
+
+/**
+ * 選択中タグのうち、現在の overview に実在するタグ名を返す。
+ * keep/exclude 送出は「選択中のタグ」を対象にする（要件 11.4, 11.5）。
+ */
+function selectedOverviewTagNames() {
+  const visible = new Set(visibleOverviewTagNames());
+  return [...state.overviewSelected].filter((name) => visible.has(name));
 }
 
 /** 検索入力で overview_search を呼び表示を絞り込む（要件 11.3）。 */
@@ -1310,15 +1377,16 @@ ops.overviewSearch.addEventListener("input", () => {
 });
 
 /**
- * 表示中タグを Keep_Tags / Exclude_Rules へ送る（要件 11.4, 11.5）。
+ * 選択中タグを Keep_Tags / Exclude_Rules へ送る（要件 11.4, 11.5）。
  * command（overview_send_keep / overview_send_exclude）に現在の RawTagFilter と
- * 表示中タグを渡し、更新後 filter を Tag_Filter 入力欄（keep/exclude テキスト
- * エリア）へ反映する。これにより次回推論・再推論に一貫して効く。
+ * 選択中タグを渡し、更新後 filter を Tag_Filter 入力欄（keep/exclude テキスト
+ * エリア）へ反映する。これにより次回推論・再推論に一貫して効く。送出後は選択を
+ * クリアする。
  */
-async function sendVisibleTags(command, targetTextarea) {
-  const tags = visibleOverviewTagNames();
+async function sendSelectedTags(command) {
+  const tags = selectedOverviewTagNames();
   if (tags.length === 0) {
-    renderText(ops.overviewResult, "送出対象のタグがありません（表示中0件）");
+    renderText(ops.overviewResult, "送出対象のタグがありません（タグをクリックして選択してください）");
     return;
   }
   const filter = buildRawTagFilter();
@@ -1327,7 +1395,9 @@ async function sendVisibleTags(command, targetTextarea) {
     // 更新後の keep / exclude を Tag_Filter 入力欄へ反映する（改行区切り）。
     ops.filterKeepTags.value = (updated.keep || []).join("\n");
     ops.filterExcludeRules.value = (updated.exclude || []).join("\n");
-    void targetTextarea;
+    // 送出済みタグの選択を解除して再描画する。
+    state.overviewSelected.clear();
+    renderOverview();
     renderText(
       ops.overviewResult,
       `${tags.length} 件のタグを送出しました。更新後フィルタで再推論すると一覧へ反映されます（要件 11.6）`,
@@ -1338,12 +1408,56 @@ async function sendVisibleTags(command, targetTextarea) {
   }
 }
 
-ops.overviewKeep.addEventListener("click", () =>
-  sendVisibleTags("overview_send_keep", ops.filterKeepTags)
-);
-ops.overviewExclude.addEventListener("click", () =>
-  sendVisibleTags("overview_send_exclude", ops.filterExcludeRules)
-);
+ops.overviewKeep.addEventListener("click", () => sendSelectedTags("overview_send_keep"));
+ops.overviewExclude.addEventListener("click", () => sendSelectedTags("overview_send_exclude"));
+
+/**
+ * 選択中タグを Replace_Rules 入力欄へ送る。
+ *
+ * Replace_Rules は「検索,置換」を 1 行 1 対で書く形式（parseReplaceRules 参照）。
+ * 選択タグ `foo` は検索側に入れ、置換先は未指定にするため各行を `foo,` の形で
+ * 追記する（タグごとにカンマを付ける）。ユーザーは後から置換先を書き足せる。
+ * 既存行と同じ検索パターンの重複行は追加しない。送出後は選択をクリアする。
+ */
+ops.overviewReplace.addEventListener("click", () => {
+  const tags = selectedOverviewTagNames();
+  if (tags.length === 0) {
+    renderText(ops.overviewResult, "送出対象のタグがありません（タグをクリックして選択してください）");
+    return;
+  }
+  // 既存の Replace_Rules 行を保持しつつ、検索側の重複を避けて追記する。
+  const existing = ops.filterReplaceRules.value
+    .split("\n")
+    .map((l) => l.replace(/\r$/, ""));
+  // 既存行の検索側（最初の「,」より前）を正規化キーで集合化する。
+  const existingSearchKeys = new Set(
+    existing
+      .map((line) => {
+        const idx = line.indexOf(",");
+        const search = idx < 0 ? line : line.slice(0, idx);
+        return search.trim().toLowerCase();
+      })
+      .filter((k) => k.length > 0)
+  );
+  const lines = existing.filter((l) => l.trim().length > 0);
+  let added = 0;
+  for (const tag of tags) {
+    const key = tag.trim().toLowerCase();
+    if (key.length === 0 || existingSearchKeys.has(key)) continue;
+    existingSearchKeys.add(key);
+    // タグごとにカンマを付けて「検索,（置換は空）」の行を追加する。
+    lines.push(`${tag},`);
+    added++;
+  }
+  ops.filterReplaceRules.value = lines.join("\n");
+  state.overviewSelected.clear();
+  renderOverview();
+  renderText(
+    ops.overviewResult,
+    `${added} 件のタグを Replace_Rules へ送出しました（置換先を入力してください）`,
+    true
+  );
+});
 
 /**
  * 更新後フィルタで同一バッチへ再推論する（要件 11.6）。
@@ -1426,6 +1540,13 @@ async function refreshModels() {
     ops.modelDirNote.textContent = state.models.model_dir_present
       ? ""
       : "Model_Dir は未作成（初回ダウンロード時に作成される）";
+
+    // 保存先パスをテキストとして表示する（開くボタンは持たない）。
+    try {
+      ops.modelDirPath.textContent = await invoke("get_model_dir_path");
+    } catch {
+      ops.modelDirPath.textContent = "（取得できません）";
+    }
 
     // 除外バリアント（必須フィールド欠落、要件 1.2/1.4）。
     ops.modelExcluded.textContent =

@@ -163,12 +163,33 @@ pub fn apply_filter(filter: &TagFilter, predicted: &[Tag]) -> FilterOutcome {
         }
     }
 
-    // (5) Additional_Tags を無条件 Adopted に追加（要件 9.6、Property 14）。
-    for extra in &filter.additional {
-        adopted.push(Tag::new(extra.clone()));
-    }
+    // (5) Additional_Tags を Adopted の先頭へ無条件付与する（要件 9.6、Property 14）。
+    //     Replace により複数の予測タグが同名へ書き換わった場合や、Additional と
+    //     予測タグが重複する場合に備え、正規化キーで重複を除去する。Additional を
+    //     先頭に置き、以降に予測由来の採用タグを続けることで「先頭・先勝ち」で
+    //     最初の出現のみを残す。
+    let mut merged: Vec<Tag> = Vec::with_capacity(filter.additional.len() + adopted.len());
+    merged.extend(filter.additional.iter().map(|extra| Tag::new(extra.clone())));
+    merged.extend(adopted);
+    let adopted = dedup_by_key(merged);
 
     FilterOutcome { adopted, discarded }
+}
+
+/// タグ列から正規化キーの重複を除去する（最初の出現＝先勝ちで残す）。
+///
+/// Replace 後に複数タグが同名へ書き換わった場合や、Additional_Tags と予測タグが
+/// 重複する場合の重複を取り除く。順序は保存し、各キーの最初の [`Tag`]（確信度含む）
+/// を残す。
+fn dedup_by_key(tags: Vec<Tag>) -> Vec<Tag> {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut out: Vec<Tag> = Vec::with_capacity(tags.len());
+    for tag in tags {
+        if seen.insert(normalize_key(&tag.body)) {
+            out.push(tag);
+        }
+    }
+    out
 }
 
 /// Replace_Rules を順に適用してタグ名を書き換える。
@@ -532,5 +553,55 @@ mod apply_filter_tests {
         let out = apply_filter(&f, &predicted);
         assert_eq!(bodies(&out.adopted), vec!["a", "b"]);
         assert!(out.discarded.is_empty());
+    }
+
+    #[test]
+    fn additional_tags_are_prepended_before_predicted() {
+        // Additional_Tags は採用タグの先頭に付与される。
+        let f = filter(&[], &[], &[], &["quality", "masterpiece"], 0.0);
+        let predicted = vec![
+            Tag::with_confidence("solo", 0.9),
+            Tag::with_confidence("1girl", 0.8),
+        ];
+        let out = apply_filter(&f, &predicted);
+        // Additional が先頭、続けて予測由来の採用タグ。
+        assert_eq!(
+            bodies(&out.adopted),
+            vec!["quality", "masterpiece", "solo", "1girl"]
+        );
+    }
+
+    #[test]
+    fn replace_collision_is_deduplicated() {
+        // 複数の予測タグが同名へ書き換わったら重複除去（先勝ち）。
+        let f = filter(
+            &[],
+            &[],
+            &[("girl", "woman"), ("1girl", "woman")],
+            &[],
+            0.0,
+        );
+        let predicted = vec![
+            Tag::with_confidence("girl", 0.9),
+            Tag::with_confidence("1girl", 0.7),
+        ];
+        let out = apply_filter(&f, &predicted);
+        // "woman" は 1 件のみ。最初の出現（confidence 0.9）を残す。
+        assert_eq!(bodies(&out.adopted), vec!["woman"]);
+        assert_eq!(out.adopted[0].confidence, Some(0.9));
+    }
+
+    #[test]
+    fn additional_duplicate_with_predicted_is_deduplicated_keeping_additional() {
+        // Additional が予測採用タグと重複する場合、先頭の Additional を残し
+        // 予測側の重複を落とす。
+        let f = filter(&[], &[], &[], &["solo"], 0.0);
+        let out = apply_filter(
+            &f,
+            &[Tag::with_confidence("solo", 0.9), Tag::with_confidence("1girl", 0.8)],
+        );
+        // 先頭に Additional の "solo"（確信度なし）、続けて重複しない "1girl"。
+        assert_eq!(bodies(&out.adopted), vec!["solo", "1girl"]);
+        assert_eq!(out.adopted[0].confidence, None);
     }
 }

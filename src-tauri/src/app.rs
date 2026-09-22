@@ -145,6 +145,8 @@ pub fn run() {
             crate::commands::adapters::delete_orphan_captions,
             // ModelService: カタログ一覧・取得状態（要件 1.1, 1.2, 3.1, 3.5）
             crate::commands::adapters::list_catalog,
+            // モデル保存フォルダのパス解決（UI に表示するテキスト用）
+            crate::commands::adapters::get_model_dir_path,
             // バリアント取得の spawn（別スレッド・進捗・キャンセル、要件 5.1〜5.5）
             crate::commands::adapters::spawn_variant_download,
             // 推論起動（遅延 DL + load を内包、要件 4.1〜4.5, 7.1）

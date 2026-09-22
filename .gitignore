@@ -66,3 +66,9 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+
+### Playwright
+# GUIテスト実行結果（実行ごとに再生成される一時ファイル）
+test-results/
+playwright-report/
+blob-report/

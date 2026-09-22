@@ -86,11 +86,10 @@
       <div class="ops-body">
         <!-- 一括操作（要件 3.1, 3.3, 3.4） -->
         <div class="ops-panel active" data-panel="bulk">
+          <!-- 対象は画面上部の選択モードで自動的に決まる（ラジオボタンは廃止）。
+               選択モード ON なら選択中の画像のみ、OFF なら一覧の全画像が対象。 -->
           <p class="panel-note">
-            対象:
-            <label><input type="radio" name="bulk-target" value="all" checked /> 一覧の全画像</label>
-            <label><input type="radio" name="bulk-target" value="selected" /> 選択中のみ</label>
-            <span class="target-hint" id="bulk-target-hint"></span>
+            対象: <span class="target-hint" id="bulk-target-hint"></span>
           </p>
           <div class="field-row">
             <input id="bulk-tags" type="text" class="text-input" placeholder="タグ（カンマ区切り）例: 1girl, solo" />
@@ -213,11 +212,10 @@
 
         <!-- 推論/バッチ（進捗・キャンセル・閾値・Batch_Size、要件 16.7, 17.6, 17.7） -->
         <div class="ops-panel" data-panel="infer">
+          <!-- 対象は画面上部の選択モードで自動的に決まる（ラジオボタンは廃止）。
+               選択モード ON なら選択中の画像のみ、OFF なら一覧の全画像が対象。 -->
           <p class="panel-note">
-            対象:
-            <label><input type="radio" name="infer-target" value="all" checked /> 一覧の全画像</label>
-            <label><input type="radio" name="infer-target" value="selected" /> 選択中のみ</label>
-            <span class="target-hint" id="infer-target-hint"></span>
+            対象: <span class="target-hint" id="infer-target-hint"></span>
           </p>
           <div class="field-row">
             <label class="inline-label">
@@ -292,9 +290,11 @@
                 <input id="overview-search" type="text" class="text-input"
                   placeholder="タグ名の部分一致（大小無視）で絞り込み" />
               </label>
-              <button id="overview-keep" type="button">表示中を Keep へ送る</button>
-              <button id="overview-exclude" type="button">表示中を Exclude へ送る</button>
+              <button id="overview-keep" type="button">選択中を Keep へ送る</button>
+              <button id="overview-exclude" type="button">選択中を Exclude へ送る</button>
+              <button id="overview-replace" type="button">選択中を Replace へ送る</button>
               <button id="overview-rerun" type="button">更新後フィルタで再推論</button>
+              <span id="overview-selected-count" class="inline-note"></span>
             </div>
             <div class="overview-cols">
               <div class="overview-col">
@@ -316,6 +316,10 @@
             <button id="model-refresh" type="button">一覧更新</button>
             <span id="model-dir-note" class="inline-note"></span>
           </div>
+          <!-- モデル保存フォルダ（Model_Dir）のパスをテキストとして表示する。 -->
+          <p class="field-row">
+            保存先: <code id="model-dir-path" class="model-dir-path"></code>
+          </p>
           <!-- カタログ各バリアントの行を JS が描画する。 -->
           <div id="model-catalog" class="model-catalog" aria-live="polite"></div>
           <div id="model-excluded" class="inline-note"></div>
