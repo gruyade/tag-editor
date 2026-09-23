@@ -59,8 +59,23 @@ fn tag_strategy() -> impl Strategy<Value = Tag> {
 }
 
 /// Predicted_Tag 列（空集合を含む 0..=6 件）。
+///
+/// 実運用では推論（[`run_labeled_inference`]）がラベル定義と 1 対 1 で
+/// タグを生成するため、1 バッチ内の Predicted_Tag に同一タグ名が複数の
+/// 確信度で重複出現することはない。apply_filter はこの前提（predicted 内で
+/// タグ名が一意）に基づき実装されており、同名重複がある場合の Adopted/
+/// Discarded 分類は未定義（dedup_by_key が Adopted 側の 2 件目以降を除去する
+/// が Discarded 側には移さないため、消滅した扱いになる）。テストの入力も
+/// 実運用条件に合わせ、正規化キー（大小無視）でタグ名が一意になるよう
+/// フィルタする。
 fn tag_vec_strategy() -> impl Strategy<Value = Vec<Tag>> {
-    vec(tag_strategy(), 0..=6)
+    use tag_editor_core::logic::tag_ops::normalize_key;
+    vec(tag_strategy(), 0..=6).prop_map(|tags| {
+        let mut seen = std::collections::HashSet::new();
+        tags.into_iter()
+            .filter(|t| seen.insert(normalize_key(&t.body)))
+            .collect()
+    })
 }
 
 /// Exclude パターン列（0..=3 件）。語彙内・語彙外を混ぜ、一致/不一致を踏ませる。
