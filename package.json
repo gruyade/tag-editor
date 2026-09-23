@@ -1,6 +1,6 @@
 {
   "name": "tageditor-frontend-tests",
-  "version": "0.2.1",
+  "version": "0.2.4",
   "private": true,
   "description": "GUI動作確認用のPlaywrightテスト（frontend/main.js のロジックをTauri APIモック経由で検証する）",
   "scripts": {
