@@ -172,7 +172,7 @@ fn counterexample_2_model_session_state_managed() {
 // ===========================================================================
 
 #[test]
-fn counterexample_3_spawn_model_download_defined_and_registered() {
+fn counterexample_3_spawn_variant_download_defined_and_registered() {
     let adapters = read_tauri_source("src/commands/adapters.rs");
     let app = read_tauri_source("src/app.rs");
 

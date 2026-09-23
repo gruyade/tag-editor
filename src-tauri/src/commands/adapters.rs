@@ -1363,26 +1363,41 @@ mod tests {
         let runner = MockRunner { output: vec![0.9] };
         let registry = Arc::new(CancelRegistry::new());
 
-        // 1 件でも進捗を観測したら、別スレッド（UI 相当）へ合図するエミッタ。
+        // 1 件目の進捗を観測したら、別スレッド（UI 相当）へ合図し、
+        // キャンセル要求が実際に反映されるまでバックグラウンドスレッドを
+        // ブロックするエミッタ。
+        //
+        // 単に `tx.send` だけで済ませると、CI 環境（共有 CPU・スケジューリング
+        // 遅延）ではテストスレッドが `request_cancel` を呼び終える前に
+        // バックグラウンドスレッドが残り全バッチ（モック推論はほぼゼロコスト）
+        // を処理し切ってしまい、キャンセルフラグが一度も観測されないまま完走する
+        // レースが発生する（GitHub Actions Ubuntu で確認済み）。`ready`/`release`
+        // の往復で「テストスレッドが request_cancel を呼び終えるまで、
+        // バックグラウンドスレッドは次バッチへ進まない」ことを保証する。
         struct SignalEmitter {
             inner: RecordingEmitter,
-            tx: mpsc::Sender<()>,
+            ready_tx: mpsc::SyncSender<()>,
+            release_rx: mpsc::Receiver<()>,
             signaled: bool,
         }
         impl ProgressEmitter for SignalEmitter {
             fn emit(&mut self, progress: Progress) {
                 if !self.signaled {
                     self.signaled = true;
-                    let _ = self.tx.send(());
+                    let _ = self.ready_tx.send(());
+                    // テストスレッドが request_cancel を呼び終えるまで待つ。
+                    let _ = self.release_rx.recv();
                 }
                 self.inner.emit(progress);
             }
         }
 
-        let (tx, rx) = mpsc::channel::<()>();
+        let (ready_tx, ready_rx) = mpsc::sync_channel::<()>(0);
+        let (release_tx, release_rx) = mpsc::sync_channel::<()>(0);
         let emitter: Box<dyn ProgressEmitter + Send> = Box::new(SignalEmitter {
             inner: RecordingEmitter::new(),
-            tx,
+            ready_tx,
+            release_rx,
             signaled: false,
         });
 
@@ -1400,9 +1415,10 @@ mod tests {
         let handle = spawn_inference_job(runner, job, Arc::clone(&registry), emitter);
 
         // ジョブが動き出したら別スレッド（本テストスレッド = UI 相当）から
-        // レジストリ経由でキャンセルを要求する。
-        let _ = rx.recv();
+        // レジストリ経由でキャンセルを要求し、バックグラウンドスレッドを解放する。
+        let _ = ready_rx.recv();
         registry.request_cancel("cross-thread");
+        let _ = release_tx.send(());
 
         let result = handle.join().expect("inference thread panicked");
 
@@ -1460,7 +1476,7 @@ mod tests {
         );
 
         // 起動自体は成功して即座に戻る（UI スレッドを塞がない）。
-        assert!(result.is_ok());
+        let handle = result.expect("推論起動は成功する");
 
         // prepare が呼ばれ（失敗し）たことを待つ。
         prepared_rx
@@ -1472,6 +1488,11 @@ mod tests {
             restore_rx.recv_timeout(Duration::from_millis(300)).is_err(),
             "準備失敗時に restore が呼ばれた（推論が実行されている）"
         );
+
+        // バックグラウンドスレッドの完了を確実に待つ。join せずテスト関数を
+        // 抜けると、プロセス終了処理と競合してクラッシュ（Windows
+        // STATUS_STACK_BUFFER_OVERRUN / Linux SIGABRT）する原因になる。
+        handle.join().expect("推論スレッドが panic した");
     }
 
     /// ロード済み状態から呼び出すと、`MockRunner` 経由で推論が実行され、

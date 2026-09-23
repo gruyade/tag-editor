@@ -58,7 +58,7 @@ fn threshold_filter(threshold: f32) -> tag_editor_core::models::TagFilter {
 // 新コマンド登録・State 管理の確認（タスク 4、要件 2.1, 2.4, 2.5, 2.7）
 // ---------------------------------------------------------------------------
 //
-// `start_inference`/`spawn_model_download`/`ModelSessionState` は、実引数に
+// `start_inference`/`spawn_variant_download`/`ModelSessionState` は、実引数に
 // `tauri::State`/`tauri::AppHandle` を取るため `tauri::Builder::run` を経ない
 // 単体呼び出しができない。かつ `app::run` を直接呼ぶと実ウィンドウ起動が
 // 必要になり、本ファイル冒頭のコメントで説明した通り WebView ランタイムへの
@@ -89,12 +89,15 @@ fn read_tauri_source(rel_from_src_tauri: &str) -> String {
 }
 
 /// (要件 2.1, 2.7) `generate_handler!` に `start_inference`/
-/// `spawn_model_download`/`get_thumbnail_path`/`get_preview_path` が
+/// `spawn_variant_download`/`get_thumbnail_path`/`get_preview_path` が
 /// 登録されていることを確認する。
 ///
 /// 起動スモークの一部として、アプリがこれらのコマンドを実際に `invoke`
 /// 可能な状態でビルドされることをソーステキスト検査で担保する
 /// （実ウィンドウなしで検査可能な範囲）。
+///
+/// `spawn_model_download` は local-model-management で `spawn_variant_download`
+/// へ改名済み（旧名は generate_handler! に存在しない）。
 #[test]
 fn app_registers_new_inference_and_model_commands_in_generate_handler() {
     let app = read_tauri_source("src/app.rs");
@@ -105,7 +108,7 @@ fn app_registers_new_inference_and_model_commands_in_generate_handler() {
 
     for expected in [
         "start_inference",
-        "spawn_model_download",
+        "spawn_variant_download",
         "get_thumbnail_path",
         "get_preview_path",
     ] {
