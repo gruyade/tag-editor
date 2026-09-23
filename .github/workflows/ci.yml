@@ -39,14 +39,32 @@ jobs:
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
 
+      - name: Download ONNX Runtime (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        # ort（load-dynamic）が実行時にロードする共有ライブラリを用意する。
+        # 未配置だと Session 構築時に ort 内部の Mutex が poison したまま
+        # unwind 不能な panic を起こし、プロセスが SIGABRT で異常終了する。
+        run: |
+          curl -sL -o onnxruntime.tgz \
+            https://github.com/microsoft/onnxruntime/releases/download/v1.19.2/onnxruntime-linux-x64-1.19.2.tgz
+          tar xzf onnxruntime.tgz
+          echo "ORT_DYLIB_PATH=$PWD/onnxruntime-linux-x64-1.19.2/lib/libonnxruntime.so" >> "$GITHUB_ENV"
+
+      - name: Download ONNX Runtime (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        # 同上（Windows 版）。未配置だと Session 構築時に ort 内部の状態が
+        # 壊れ、プロセスが STATUS_STACK_BUFFER_OVERRUN で異常終了する。
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/microsoft/onnxruntime/releases/download/v1.19.2/onnxruntime-win-x64-1.19.2.zip" -OutFile onnxruntime.zip
+          Expand-Archive -Path onnxruntime.zip -DestinationPath .
+          echo "ORT_DYLIB_PATH=$PWD\onnxruntime-win-x64-1.19.2\lib\onnxruntime.dll" >> $env:GITHUB_ENV
+
       - name: Run cargo test (workspace)
-        # --release で実行する。画像プロパティテスト（サムネイル/プレビュー生成）は
-        # debug ビルドの image クレートが極端に遅く、テスト全体のボトルネックになる
-        # ため、ネイティブ最適化で桁違いに高速化する。
-        # 以前は SIGABRT 回避のため --test-threads=1 を使っていたが、原因だった
-        # デタッチスレッド（テスト関数終了後も走り続けるバックグラウンド推論
-        # スレッド）を JoinHandle の join で確実に回収するようテストを修正した
-        # ため、並列実行へ戻している。
+        # --release で実行する（debug ビルドの image クレートによる画像
+        # プロパティテストの低速化を避けるため）。並列実行（既定）で問題ない。
+        # ORT_DYLIB_PATH は上記ステップで設定済みで、build_session が
+        # ort::init_from 経由で明示的にロードする。
         run: cargo test --workspace --release --verbose
 
   build:

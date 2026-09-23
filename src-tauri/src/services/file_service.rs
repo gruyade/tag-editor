@@ -830,12 +830,21 @@ mod path_cache_tests {
         assert_eq!(result.width, 640);
         assert_eq!(result.height, 480);
 
-        // キャッシュディレクトリへの書き出しが発生していないことを確認。
+        // 「新規書き出しなし」の検証: 返り値が共有キャッシュディレクトリ配下では
+        // なく元ファイル（tempdir 配下）を指すことを確認する。
+        //
+        // 以前は cache_dir() のエントリ数を前後比較していたが、cache_dir() は
+        // プロセス全体で共有される固定ディレクトリ（temp_dir 配下）であり、
+        // 並列実行される他テスト（oversized 画像をキャッシュへ書き出すもの等）が
+        // 同ディレクトリを書き換えるため、エントリ数の前後比較は本質的に競合し
+        // 非決定的に失敗する（CI の並列実行で SIGABRT / スタック破壊の原因に
+        // なっていた）。返り値のパスで直接検証すれば共有状態に依存しない。
         let cache = cache_dir().unwrap();
-        let entries_before = std::fs::read_dir(&cache).unwrap().count();
-        let _ = get_preview_path(&path);
-        let entries_after = std::fs::read_dir(&cache).unwrap().count();
-        assert_eq!(entries_before, entries_after);
+        assert!(
+            !Path::new(&result.path).starts_with(&cache),
+            "制限内サイズでは返り値がキャッシュ配下を指してはならない: {}",
+            result.path
+        );
     }
 
     #[test]

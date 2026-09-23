@@ -638,11 +638,70 @@ fn find_tag_definition(dir: &Path) -> Option<std::path::PathBuf> {
     csv.or(json)
 }
 
+/// ONNX Runtime 共有ライブラリのファイル名（OS ごと）。
+#[cfg(target_os = "windows")]
+const ORT_DYLIB_FILENAME: &str = "onnxruntime.dll";
+#[cfg(target_os = "linux")]
+const ORT_DYLIB_FILENAME: &str = "libonnxruntime.so";
+#[cfg(target_os = "macos")]
+const ORT_DYLIB_FILENAME: &str = "libonnxruntime.dylib";
+
+/// ONNX Runtime 共有ライブラリのパスを解決する。
+///
+/// 探索順序:
+/// 1. 環境変数 `ORT_DYLIB_PATH`（CI・開発時の明示指定用。ファイルそのものへの
+///    パス、またはディレクトリへのパスのいずれも受け付ける）。
+/// 2. 実行ファイルと同じディレクトリ（配布時にランタイムを同梱するレイアウト）。
+///
+/// いずれも見つからない場合は `None` を返し、呼び出し側は `ort` 既定の
+/// システム検索へフォールバックする。
+fn resolve_ort_dylib_path() -> Option<std::path::PathBuf> {
+    if let Ok(configured) = std::env::var("ORT_DYLIB_PATH") {
+        let configured = std::path::PathBuf::from(configured);
+        let candidate = if configured.is_dir() {
+            configured.join(ORT_DYLIB_FILENAME)
+        } else {
+            configured
+        };
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+
+    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    let candidate = exe_dir.join(ORT_DYLIB_FILENAME);
+    candidate.is_file().then_some(candidate)
+}
+
+/// `ort`（ONNX Runtime、`load-dynamic`）をプロセス内で一度だけ初期化する。
+///
+/// `ort` は共有ライブラリを動的ロードする（`load-dynamic` 機能）。ライブラリの
+/// 場所を [`ort::init_from`] で明示的に教えずに `Session::builder()` を呼ぶと、
+/// ランタイムが見つからない環境（CI 等）で `ort` 内部の Mutex が poison した
+/// まま unwind 不能な panic を起こしプロセスが異常終了する（Linux: SIGABRT、
+/// Windows: STATUS_STACK_BUFFER_OVERRUN として観測された）。
+///
+/// [`resolve_ort_dylib_path`] でライブラリが見つかった場合のみ `init_from` を
+/// 呼ぶ。見つからない場合は明示初期化をスキップし、`ort` 既定のシステム検索に
+/// 委ねる（従来の挙動を保つ）。`OnceLock` によりプロセス内で一度だけ実行される
+/// ことを保証する（`ort` の要件: 他の `ort` API 使用前に一度だけ呼ぶ）。
+fn ensure_ort_initialized() {
+    static INIT: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    INIT.get_or_init(|| {
+        if let Some(dylib_path) = resolve_ort_dylib_path() {
+            if let Ok(builder) = ort::init_from(&dylib_path) {
+                builder.commit();
+            }
+        }
+    });
+}
+
 /// `.onnx` ファイルから ONNX 推論セッションを構築する。
 ///
 /// 実 `ort::Session` の構築で、共有ライブラリ（`load-dynamic`）を要する。構築に
 /// 失敗した場合は要件 15.6 に従い `Err(ModelLoad)` を返す（推論は無効のまま）。
 fn build_session(onnx_path: &Path) -> AppResult<ort::session::Session> {
+    ensure_ort_initialized();
     ort::session::Session::builder()
         .and_then(|mut b| b.commit_from_file(onnx_path))
         .map_err(|e| {

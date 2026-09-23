@@ -1460,7 +1460,7 @@ mod tests {
         );
 
         // 起動自体は成功して即座に戻る（UI スレッドを塞がない）。
-        assert!(result.is_ok());
+        let handle = result.expect("推論起動は成功する");
 
         // prepare が呼ばれ（失敗し）たことを待つ。
         prepared_rx
@@ -1472,6 +1472,11 @@ mod tests {
             restore_rx.recv_timeout(Duration::from_millis(300)).is_err(),
             "準備失敗時に restore が呼ばれた（推論が実行されている）"
         );
+
+        // バックグラウンドスレッドの完了を確実に待つ。join せずテスト関数を
+        // 抜けると、プロセス終了処理と競合してクラッシュ（Windows
+        // STATUS_STACK_BUFFER_OVERRUN / Linux SIGABRT）する原因になる。
+        handle.join().expect("推論スレッドが panic した");
     }
 
     /// ロード済み状態から呼び出すと、`MockRunner` 経由で推論が実行され、
